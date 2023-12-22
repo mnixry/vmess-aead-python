@@ -3,6 +3,14 @@ class StatefulReader:
         self._data = data
         self._offset = 0
 
+    @property
+    def offset(self) -> int:
+        return self._offset
+
+    @property
+    def remaining(self) -> int:
+        return len(self._data) - self._offset
+
     def read(self, length: int) -> bytes:
         if self._offset + length > len(self._data):
             raise ValueError("Read out of bound")

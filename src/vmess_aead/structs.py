@@ -5,7 +5,7 @@ from ipaddress import IPv4Address, IPv6Address
 from typing import Optional, Union
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
 
 from vmess_aead.enums import (
     VMessBodyAddressType,
@@ -15,7 +15,12 @@ from vmess_aead.enums import (
 )
 from vmess_aead.kdf import KDFSaltConst, kdf12, kdf16
 from vmess_aead.reader import StatefulReader
-from vmess_aead.utils import cmd_key, fnv1a32
+from vmess_aead.utils import (
+    Shake128Stream,
+    cmd_key,
+    fnv1a32,
+    generate_chacha20_poly1305_key,
+)
 
 
 @dataclass
@@ -134,6 +139,8 @@ class VMessAEADPacketHeader:
     """Nonce, 8 bytes"""
     payload: VMessPlainPacketHeader
     """Payload"""
+    read_offset: int
+    """Offset after reading the header"""
 
     @classmethod
     def read(
@@ -202,9 +209,78 @@ class VMessAEADPacketHeader:
             encrypted_auth_id,
         )
         payload = VMessPlainPacketHeader.read(payload_header_bytes, verify_checksum)
-        return cls(auth_id, length, nonce, payload)
+        return cls(auth_id, length, nonce, payload, reader.offset)
 
     @staticmethod
     def _gcm_decrypt(key: bytes, nonce: bytes, cipher_text: bytes, ad: bytes) -> bytes:
         aes_gcm = AESGCM(key)
         return aes_gcm.decrypt(nonce, cipher_text, ad)
+
+    def read_body(self, body: bytes, verify_checksum: bool = True):
+        reader = StatefulReader(body)
+
+        masker = None
+        if self.payload.options & VMessBodyOptions.CHUNK_MASKING:
+            masker = Shake128Stream(self.payload.body_iv)
+
+        count = 0
+        while reader.remaining > 0:
+            if (
+                self.payload.options & VMessBodyOptions.GLOBAL_PADDING
+                and masker is not None
+            ):
+                padding_length = masker.next_uint16() % 64
+            else:
+                padding_length = 0
+
+            aead_nonce = count.to_bytes(2, "big") + self.payload.body_iv[2:12]
+            if self.payload.options & VMessBodyOptions.AUTHENTICATED_LENGTH:
+                key = kdf16(self.payload.body_key, [b"auth_len"])
+                if self.payload.security is VMessBodySecurity.AES_128_GCM:
+                    cipher = AESGCM(key)
+                elif self.payload.security is VMessBodySecurity.CHACHA20_POLY1305:
+                    cipher = ChaCha20Poly1305(generate_chacha20_poly1305_key(key))
+                else:
+                    raise ValueError(
+                        f"Authenticated length is not supported for {self.payload.security!r}"
+                    )
+                encrypted_length = reader.read(2 + 16)  # AEAD tag size is 16 bytes
+                decrypted_length = cipher.decrypt(aead_nonce, encrypted_length, None)
+                length = int.from_bytes(decrypted_length, "big")
+            elif masker is not None:
+                length = reader.read_uint16() ^ masker.next_uint16()
+            else:
+                length = reader.read_uint16()
+
+            content_length = length - padding_length
+
+            if self.payload.security is VMessBodySecurity.NONE:
+                yield reader.read(content_length)
+            elif self.payload.security is VMessBodySecurity.AES_128_CFB:
+                decryptor = Cipher(
+                    algorithms.AES(self.payload.body_key),
+                    modes.CFB(self.payload.body_iv),
+                ).decryptor()
+                encrypted_data = reader.read(content_length - 4)  # 4 bytes for checksum
+                decrypted_data = decryptor.update(encrypted_data) + decryptor.finalize()
+                checksum = reader.read_uint32()
+                if verify_checksum:
+                    assert checksum == binascii.crc32(decrypted_data)
+                yield decrypted_data
+            elif self.payload.security is VMessBodySecurity.AES_128_GCM:
+                cipher = AESGCM(self.payload.body_key)
+                encrypted_data = reader.read(content_length)
+                yield cipher.decrypt(aead_nonce, encrypted_data, None)
+            elif self.payload.security is VMessBodySecurity.CHACHA20_POLY1305:
+                cipher = ChaCha20Poly1305(
+                    generate_chacha20_poly1305_key(self.payload.body_key)
+                )
+                encrypted_data = reader.read(content_length)
+                yield cipher.decrypt(aead_nonce, encrypted_data, None)
+            else:
+                raise ValueError(f"Unknown security: {self.payload.security!r}")
+
+            if padding_length > 0:
+                reader.read(padding_length)
+            count += 1
+        return
