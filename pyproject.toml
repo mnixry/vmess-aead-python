@@ -1,0 +1,22 @@
+[project]
+name = "vmess-aead"
+version = "0.1.0"
+description = "VMessAEAD packet parser for python."
+authors = [
+    {name = "Mix", email = "32300164+mnixry@users.noreply.github.com"},
+]
+dependencies = [
+    "cryptography>=41.0.7",
+]
+requires-python = ">=3.8"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.pdm.dev-dependencies]
+dev = [
+    "ruff>=0.1.9",
+]
