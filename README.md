@@ -4,7 +4,7 @@ VMessAEAD packet parser for Python.
 
 ## TODO
 
-- [ ] Body decryption
+- [x] Body decryption
 - [ ] Packet serialization
 - [ ] Response packet construction
 - [ ] Fully working server/client implementation
