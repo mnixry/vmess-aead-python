@@ -2,7 +2,7 @@ import uuid
 from ipaddress import IPv4Address
 from pathlib import Path
 
-from vmess_aead import VMessAEADPacketHeader
+from vmess_aead import VMessAEADRequestPacketHeader
 from vmess_aead.kdf import kdf
 
 
@@ -23,7 +23,7 @@ def test_kdf():
 def test_full_header():
     data = bytes.fromhex(Path(__file__).parent.joinpath("test.hex").read_text())
     user_id = uuid.UUID("b831381d-6324-4d53-ad4f-8cda48b30811")
-    read = VMessAEADPacketHeader.read(data, user_id, timestamp=1703242500)
+    read = VMessAEADRequestPacketHeader.read(data, user_id, timestamp=1703242500)
 
     assert read.payload.address == IPv4Address("104.26.12.31")
     assert read.payload.port == 80

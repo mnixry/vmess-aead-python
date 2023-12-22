@@ -130,7 +130,9 @@ class VMessPlainPacketHeader:
 
 
 @dataclass
-class VMessAEADPacketHeader:
+class VMessAEADRequestPacketHeader:
+    """Packet send from client to server"""
+
     auth_id: VMessAuthID
     """Authentication ID"""
     length: int
