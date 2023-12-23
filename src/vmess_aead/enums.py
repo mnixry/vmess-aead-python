@@ -25,3 +25,8 @@ class VMessBodyAddressType(IntEnum):
     IPV4 = 0x01
     DOMAIN = 0x02
     IPV6 = 0x03
+
+
+class VMessResponseBodyOptions(IntFlag):
+    TCP_REUSE = 0x01
+    """DEPRECATED"""
