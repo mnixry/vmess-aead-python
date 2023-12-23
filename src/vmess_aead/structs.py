@@ -14,7 +14,7 @@ from vmess_aead.enums import (
     VMessBodySecurity,
 )
 from vmess_aead.kdf import KDFSaltConst, kdf12, kdf16
-from vmess_aead.reader import StatefulReader
+from vmess_aead.reader import BaseReader, BytesReader
 from vmess_aead.utils import (
     Shake128Stream,
     cmd_key,
@@ -37,10 +37,10 @@ class VMessAuthID:
         decrypted = cls._decrypt(
             encrypted, kdf16(cmd_key(uuid), [KDFSaltConst.AUTH_ID_ENCRYPTION_KEY])
         )
-        reader = StatefulReader(decrypted)
+        reader = BytesReader(decrypted)
         timestamp = reader.read_uint64()
         rand = reader.read(4)
-        checksum_body = reader.read_all_before()
+        checksum_body = reader.read_before()
         checksum = reader.read_uint32()
         if verify_checksum:
             assert checksum == binascii.crc32(checksum_body)
@@ -85,7 +85,7 @@ class VMessPlainPacketHeader:
 
     @classmethod
     def read(cls, packet: bytes, verify_checksum: bool = True):
-        reader = StatefulReader(packet)
+        reader = BytesReader(packet)
         version = reader.read_byte()
         body_iv = reader.read(16)
         body_key = reader.read(16)
@@ -109,7 +109,7 @@ class VMessPlainPacketHeader:
             raise ValueError(f"Unknown address type: {address_type!r}")
         if padding_length > 0:
             reader.read(padding_length)
-        checksum_body = reader.read_all_before()
+        checksum_body = reader.read_before()
         checksum = reader.read_uint32()
         if verify_checksum:
             assert checksum == fnv1a32(checksum_body)
@@ -147,14 +147,13 @@ class VMessAEADRequestPacketHeader:
     @classmethod
     def read(
         cls,
-        packet: bytes,
+        reader: BaseReader,
         uuid: uuid.UUID,
         *,
         verify_checksum: bool = True,
         timestamp: Optional[int] = None,
         timestamp_range: int = 2 * 60,
     ):
-        reader = StatefulReader(packet)
         encrypted_auth_id = reader.read(16)
         auth_id = VMessAuthID.from_encrypted(encrypted_auth_id, uuid, verify_checksum)
         if timestamp is not None:
@@ -218,15 +217,13 @@ class VMessAEADRequestPacketHeader:
         aes_gcm = AESGCM(key)
         return aes_gcm.decrypt(nonce, cipher_text, ad)
 
-    def read_body(self, body: bytes, verify_checksum: bool = True):
-        reader = StatefulReader(body)
-
+    def read_body(self, reader: BaseReader, verify_checksum: bool = True):
         masker = None
         if self.payload.options & VMessBodyOptions.CHUNK_MASKING:
             masker = Shake128Stream(self.payload.body_iv)
 
         count = 0
-        while reader.remaining > 0:
+        while True:
             if (
                 self.payload.options & VMessBodyOptions.GLOBAL_PADDING
                 and masker is not None
