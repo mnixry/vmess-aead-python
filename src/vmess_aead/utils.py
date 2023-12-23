@@ -37,7 +37,7 @@ class Shake128Stream:
 
     def next_byte(self) -> int:
         if self.buffer_cursor >= self.buffer_size:
-            self.buffer = self.hasher.digest(self.increase_length)
+            self.buffer = self.hasher.digest(self.buffer_size + self.increase_length)
         byte = self.buffer[self.buffer_cursor]
         self.buffer_cursor += 1
         return byte
