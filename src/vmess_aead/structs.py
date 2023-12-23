@@ -236,7 +236,7 @@ class VMessAEADRequestPacketHeader:
                     )
                 encrypted_length = reader.read(2 + 16)  # AEAD tag size is 16 bytes
                 decrypted_length = cipher.decrypt(aead_nonce, encrypted_length, None)
-                length = int.from_bytes(decrypted_length, "big")
+                length = int.from_bytes(decrypted_length, "big") + 16
             elif masker is not None:
                 length = reader.read_uint16() ^ masker.next_uint16()
             else:
@@ -371,8 +371,6 @@ class VMessAEADResponsePacketHeader:
             masker = Shake128Stream(self.body_iv)
 
         for count, data in zip(itertools.count(), buffer):
-            aead_nonce = count.to_bytes(2, "big") + self.body_iv[2:12]
-
             if request.payload.security is VMessBodySecurity.NONE:
                 encrypted_data = data
             elif request.payload.security is VMessBodySecurity.AES_128_CFB:
@@ -384,9 +382,11 @@ class VMessAEADResponsePacketHeader:
                 encrypted_data += fnv1a32(data).to_bytes(4, "big")
             elif request.payload.security is VMessBodySecurity.AES_128_GCM:
                 cipher = AESGCM(self.body_key)
+                aead_nonce = count.to_bytes(2, "big") + self.body_iv[2:12]
                 encrypted_data = cipher.encrypt(aead_nonce, data, None)
             elif request.payload.security is VMessBodySecurity.CHACHA20_POLY1305:
                 cipher = ChaCha20Poly1305(generate_chacha20_poly1305_key(self.body_key))
+                aead_nonce = count.to_bytes(2, "big") + self.body_iv[2:12]
                 encrypted_data = cipher.encrypt(aead_nonce, data, None)
             else:
                 raise ValueError(f"Unknown security: {request.payload.security!r}")
@@ -402,7 +402,8 @@ class VMessAEADResponsePacketHeader:
 
             length = len(encrypted_data) + padding_length
             if request.payload.options & VMessBodyOptions.AUTHENTICATED_LENGTH:
-                key = kdf16(self.body_key, [b"auth_len"])
+                key = kdf16(request.payload.body_key, [b"auth_len"])
+                aead_nonce = count.to_bytes(2, "big") + request.payload.body_iv[2:12]
                 if request.payload.security is VMessBodySecurity.AES_128_GCM:
                     cipher = AESGCM(key)
                 elif request.payload.security is VMessBodySecurity.CHACHA20_POLY1305:
@@ -412,7 +413,7 @@ class VMessAEADResponsePacketHeader:
                         f"Authenticated length is not supported for {request.payload.security!r}"
                     )
                 encrypted_length = cipher.encrypt(
-                    aead_nonce, length.to_bytes(2, "big"), None
+                    aead_nonce, (length - 16).to_bytes(2, "big"), None
                 )
             elif masker is not None:
                 encrypted_length = (masker.next_uint16() ^ length).to_bytes(2, "big")
