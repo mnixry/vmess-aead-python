@@ -1,6 +1,7 @@
 from binascii import crc32
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address
+from secrets import token_bytes as random_bytes
 from typing import Optional, Union
 from uuid import UUID
 
@@ -27,10 +28,10 @@ class VMessAuthID:
 
     @classmethod
     def from_packet(cls, encrypted: bytes, user_id: UUID, verify_checksum: bool = True):
-        decrypted = cls._decrypt(
-            encrypted, kdf16(cmd_key(user_id), [KDFSaltConst.AUTH_ID_ENCRYPTION_KEY])
-        )
-        reader = BytesReader(decrypted)
+        key = kdf16(cmd_key(user_id), [KDFSaltConst.AUTH_ID_ENCRYPTION_KEY])
+        cipher = Cipher(algorithms.AES(key), modes.ECB())
+        decryptor = cipher.decryptor()
+        reader = BytesReader(decryptor.update(encrypted) + decryptor.finalize())
         timestamp = reader.read_uint64()
         rand = reader.read(4)
         checksum_body = reader.read_before()
@@ -39,14 +40,17 @@ class VMessAuthID:
             assert checksum == crc32(checksum_body)
         return cls(timestamp, rand)
 
-    @staticmethod
-    def _decrypt(encrypted: bytes, key: bytes) -> bytes:
-        assert len(encrypted) == 16  # aes-128 block size
+    def to_packet(self, user_id: UUID):
+        plain_packet = b""
+        plain_packet += self.timestamp.to_bytes(8, "big")
+        plain_packet += self.rand
+        checksum = crc32(plain_packet)
+        plain_packet += checksum.to_bytes(4, "big")
+        key = kdf16(cmd_key(user_id), [KDFSaltConst.AUTH_ID_ENCRYPTION_KEY])
         cipher = Cipher(algorithms.AES(key), modes.ECB())
-        decryptor = cipher.decryptor()
-        decrypted_auth_id = decryptor.update(encrypted) + decryptor.finalize()
-        assert len(decrypted_auth_id) == 16
-        return decrypted_auth_id
+        encryptor = cipher.encryptor()
+        encrypted = encryptor.update(plain_packet) + encryptor.finalize()
+        return encrypted
 
 
 @dataclass
@@ -104,8 +108,7 @@ class VMessPlainPacketHeader:
             reader.read(padding_length)
         checksum_body = reader.read_before()
         checksum = reader.read_uint32()
-        if verify_checksum:
-            assert checksum == fnv1a32(checksum_body)
+        assert not verify_checksum or checksum == fnv1a32(checksum_body)
         return cls(
             version,
             body_iv,
@@ -120,6 +123,34 @@ class VMessPlainPacketHeader:
             address_type,
             address,
         )
+
+    def to_packet(self):
+        packet = b""
+        packet += self.version.to_bytes(1, "big")
+        packet += self.body_iv
+        packet += self.body_key
+        packet += self.response_header.to_bytes(1, "big")
+        packet += self.options.value.to_bytes(1, "big")
+        packet += ((self.padding_length << 4) | self.security.value).to_bytes(1, "big")
+        packet += self.reserved.to_bytes(1, "big")
+        packet += self.command.value.to_bytes(1, "big")
+        packet += self.port.to_bytes(2, "big")
+        packet += self.address_type.value.to_bytes(1, "big")
+        if isinstance(self.address, IPv4Address):
+            packet += self.address.packed
+        elif isinstance(self.address, str):
+            address_bytes = self.address.encode()
+            packet += len(address_bytes).to_bytes(1, "big")
+            packet += address_bytes
+        elif isinstance(self.address, IPv6Address):
+            packet += self.address.packed
+        else:
+            raise ValueError(f"Unknown address type: {self.address!r}")
+        if self.padding_length > 0:
+            packet += random_bytes(self.padding_length)
+        checksum = fnv1a32(packet)
+        packet += checksum.to_bytes(4, "big")
+        return packet
 
 
 @dataclass
@@ -199,3 +230,51 @@ class VMessAEADRequestPacketHeader:
             payload_header_bytes, verify_checksum
         )
         return cls(auth_id, length, nonce, payload, reader.offset)
+
+    def to_packet(self, user_id: UUID):
+        packet = b""
+        packet += (encrypted_auth_id := self.auth_id.to_packet(user_id))
+        packet += (nonce := random_bytes(8))
+
+        payload_header_length_key = kdf16(
+            cmd_key(user_id),
+            [
+                KDFSaltConst.VMESS_HEADER_PAYLOAD_LENGTH_AEAD_KEY,
+                encrypted_auth_id,
+                nonce,
+            ],
+        )
+        payload_header_length_nonce = kdf12(
+            cmd_key(user_id),
+            [
+                KDFSaltConst.VMESS_HEADER_PAYLOAD_LENGTH_AEAD_IV,
+                encrypted_auth_id,
+                nonce,
+            ],
+        )
+        packet += AESGCM(payload_header_length_key).encrypt(
+            payload_header_length_nonce,
+            self.length.to_bytes(2, "big"),
+            encrypted_auth_id,
+        )
+
+        payload_header_key = kdf16(
+            cmd_key(user_id),
+            [
+                KDFSaltConst.VMESS_HEADER_PAYLOAD_AEAD_KEY,
+                encrypted_auth_id,
+                nonce,
+            ],
+        )
+        payload_header_nonce = kdf12(
+            cmd_key(user_id),
+            [
+                KDFSaltConst.VMESS_HEADER_PAYLOAD_AEAD_IV,
+                encrypted_auth_id,
+                nonce,
+            ],
+        )
+        packet += AESGCM(payload_header_key).encrypt(
+            payload_header_nonce, self.payload.to_packet(), encrypted_auth_id
+        )
+        return packet
