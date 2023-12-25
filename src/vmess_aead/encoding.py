@@ -95,6 +95,7 @@ class VMessBodyEncoder:
         if self.options & VMessBodyOptions.AUTHENTICATED_LENGTH:
             length_key = self.authenticated_length_key or self.body_key
             length_iv = self.authenticated_length_iv or self.body_iv
+            nonce = self.count.to_bytes(2, "big") + length_iv[2:12]
             key = kdf16(length_key, [b"auth_len"])
             if self.security is VMessBodySecurity.AES_128_GCM:
                 cipher = AESGCM(key)
@@ -105,7 +106,7 @@ class VMessBodyEncoder:
                     f"Authenticated length is not supported for {self.security!r}"
                 )
             encrypted_length = reader.read(2 + 16)  # AEAD tag size is 16 bytes
-            decrypted_length = cipher.decrypt(length_iv, encrypted_length, None)
+            decrypted_length = cipher.decrypt(nonce, encrypted_length, None)
             length = int.from_bytes(decrypted_length, "big") + 16
         elif self.masker is not None:
             length = reader.read_uint16() ^ self.masker.next_uint16()

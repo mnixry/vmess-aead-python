@@ -159,14 +159,10 @@ class VMessAEADRequestPacketHeader:
 
     auth_id: VMessAuthID
     """Authentication ID"""
-    length: int
-    """Length of the payload, uint16, big endian"""
     nonce: bytes
     """Nonce, 8 bytes"""
     payload: VMessPlainPacketHeader
     """Payload"""
-    read_offset: int
-    """Offset after reading the header"""
 
     @classmethod
     def from_packet(
@@ -229,41 +225,19 @@ class VMessAEADRequestPacketHeader:
         payload = VMessPlainPacketHeader.from_packet(
             payload_header_bytes, verify_checksum
         )
-        return cls(auth_id, length, nonce, payload, reader.offset)
+        return cls(auth_id, nonce, payload)
 
     def to_packet(self, user_id: UUID):
         packet = b""
         packet += (encrypted_auth_id := self.auth_id.to_packet(user_id))
-        packet += (nonce := random_bytes(8))
-
-        payload_header_length_key = kdf16(
-            cmd_key(user_id),
-            [
-                KDFSaltConst.VMESS_HEADER_PAYLOAD_LENGTH_AEAD_KEY,
-                encrypted_auth_id,
-                nonce,
-            ],
-        )
-        payload_header_length_nonce = kdf12(
-            cmd_key(user_id),
-            [
-                KDFSaltConst.VMESS_HEADER_PAYLOAD_LENGTH_AEAD_IV,
-                encrypted_auth_id,
-                nonce,
-            ],
-        )
-        packet += AESGCM(payload_header_length_key).encrypt(
-            payload_header_length_nonce,
-            self.length.to_bytes(2, "big"),
-            encrypted_auth_id,
-        )
+        assert len(encrypted_auth_id) == 16 and len(self.nonce) == 8
 
         payload_header_key = kdf16(
             cmd_key(user_id),
             [
                 KDFSaltConst.VMESS_HEADER_PAYLOAD_AEAD_KEY,
                 encrypted_auth_id,
-                nonce,
+                self.nonce,
             ],
         )
         payload_header_nonce = kdf12(
@@ -271,10 +245,34 @@ class VMessAEADRequestPacketHeader:
             [
                 KDFSaltConst.VMESS_HEADER_PAYLOAD_AEAD_IV,
                 encrypted_auth_id,
-                nonce,
+                self.nonce,
             ],
         )
-        packet += AESGCM(payload_header_key).encrypt(
+        encrypted_payload = AESGCM(payload_header_key).encrypt(
             payload_header_nonce, self.payload.to_packet(), encrypted_auth_id
         )
+
+        payload_header_length_key = kdf16(
+            cmd_key(user_id),
+            [
+                KDFSaltConst.VMESS_HEADER_PAYLOAD_LENGTH_AEAD_KEY,
+                encrypted_auth_id,
+                self.nonce,
+            ],
+        )
+        payload_header_length_nonce = kdf12(
+            cmd_key(user_id),
+            [
+                KDFSaltConst.VMESS_HEADER_PAYLOAD_LENGTH_AEAD_IV,
+                encrypted_auth_id,
+                self.nonce,
+            ],
+        )
+        packet += AESGCM(payload_header_length_key).encrypt(
+            payload_header_length_nonce,
+            (len(encrypted_payload) - 16).to_bytes(2, "big"),
+            encrypted_auth_id,
+        )
+        packet += self.nonce
+        packet += encrypted_payload
         return packet
