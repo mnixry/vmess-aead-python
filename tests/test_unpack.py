@@ -3,7 +3,7 @@ from io import BytesIO
 from ipaddress import IPv4Address
 from pathlib import Path
 
-from vmess_aead import VMessAEADRequestPacketHeader
+from vmess_aead import VMessAEADRequestPacketHeader, VMessBodyEncoder
 from vmess_aead.kdf import kdf
 from vmess_aead.utils.reader import BufferedReader, IOReader
 
@@ -33,7 +33,13 @@ def test_full_header():
     )
     assert header.payload.address == IPv4Address("104.26.12.31")
     assert header.payload.port == 80
-    body = next(header.read_body(reader))
+    encoder = VMessBodyEncoder(
+        header.payload.body_key,
+        header.payload.body_iv,
+        header.payload.options,
+        header.payload.security,
+    )
+    body = encoder.decode_once(reader)
     assert (
         body
         == b"GET / HTTP/1.1\r\nHost: ip.sb\r\nUser-Agent: curl/8.5.0\r\nAccept: */*\r\n\r\n"
