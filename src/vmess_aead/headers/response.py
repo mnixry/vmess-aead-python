@@ -28,7 +28,8 @@ class VMessResponseCommand(abc.ABC):
         assert not verify_checksum or checksum == fnv1a32(command_packet)
         return command_registries[command_id].from_packet(command_id, command_packet)
 
-    @abc.abstractclassmethod  # type: ignore
+    @classmethod
+    @abc.abstractmethod
     def from_packet(cls, command_id: int, packet: bytes) -> "VMessResponseCommand":
         raise NotImplementedError
 
