@@ -5,7 +5,7 @@ from pathlib import Path
 
 from vmess_aead import VMessAEADRequestPacketHeader
 from vmess_aead.kdf import kdf
-from vmess_aead.reader import BufferedReader, IOReader
+from vmess_aead.utils.reader import BufferedReader, IOReader
 
 
 def test_kdf():

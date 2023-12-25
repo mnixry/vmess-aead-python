@@ -15,7 +15,7 @@ from vmess_aead.enums import (
     VMessBodySecurity,
 )
 from vmess_aead.kdf import KDFSaltConst, kdf12, kdf16
-from vmess_aead.reader import BaseReader, BytesReader
+from vmess_aead.utils.reader import BaseReader, BytesReader
 from vmess_aead.utils import (
     Shake128Stream,
     cmd_key,
