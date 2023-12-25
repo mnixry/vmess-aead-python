@@ -1,10 +1,10 @@
-import binascii
 import itertools
-import secrets
-import uuid
+from binascii import crc32
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address
+from secrets import token_bytes as random_bytes
 from typing import Iterable, Literal, Optional, Union
+from uuid import UUID
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
@@ -34,11 +34,9 @@ class VMessAuthID:
     """Random bytes, 4 bytes"""
 
     @classmethod
-    def from_encrypted(
-        cls, encrypted: bytes, uuid: uuid.UUID, verify_checksum: bool = True
-    ):
+    def from_packet(cls, encrypted: bytes, user_id: UUID, verify_checksum: bool = True):
         decrypted = cls._decrypt(
-            encrypted, kdf16(cmd_key(uuid), [KDFSaltConst.AUTH_ID_ENCRYPTION_KEY])
+            encrypted, kdf16(cmd_key(user_id), [KDFSaltConst.AUTH_ID_ENCRYPTION_KEY])
         )
         reader = BytesReader(decrypted)
         timestamp = reader.read_uint64()
@@ -46,7 +44,7 @@ class VMessAuthID:
         checksum_body = reader.read_before()
         checksum = reader.read_uint32()
         if verify_checksum:
-            assert checksum == binascii.crc32(checksum_body)
+            assert checksum == crc32(checksum_body)
         return cls(timestamp, rand)
 
     @staticmethod
@@ -87,7 +85,7 @@ class VMessPlainPacketHeader:
     """Address, variable length"""
 
     @classmethod
-    def read(cls, packet: bytes, verify_checksum: bool = True):
+    def from_packet(cls, packet: bytes, verify_checksum: bool = True):
         reader = BytesReader(packet)
         version = reader.read_byte()
         body_iv = reader.read(16)
@@ -148,25 +146,24 @@ class VMessAEADRequestPacketHeader:
     """Offset after reading the header"""
 
     @classmethod
-    def read(
+    def from_packet(
         cls,
         reader: BaseReader,
-        uuid: uuid.UUID,
+        user_id: UUID,
         *,
         verify_checksum: bool = True,
         timestamp: Optional[int] = None,
         timestamp_range: int = 2 * 60,
     ):
         encrypted_auth_id = reader.read(16)
-        auth_id = VMessAuthID.from_encrypted(encrypted_auth_id, uuid, verify_checksum)
+        auth_id = VMessAuthID.from_packet(encrypted_auth_id, user_id, verify_checksum)
         if timestamp is not None:
             assert abs(timestamp - auth_id.timestamp) <= timestamp_range
-
         encrypted_header_length = reader.read(2 + 16)  # AEAD tag size is 16 bytes
         nonce = reader.read(8)
 
         payload_header_length_key = kdf16(
-            cmd_key(uuid),
+            cmd_key(user_id),
             [
                 KDFSaltConst.VMESS_HEADER_PAYLOAD_LENGTH_AEAD_KEY,
                 encrypted_auth_id,
@@ -174,7 +171,7 @@ class VMessAEADRequestPacketHeader:
             ],
         )
         payload_header_length_nonce = kdf12(
-            cmd_key(uuid),
+            cmd_key(user_id),
             [
                 KDFSaltConst.VMESS_HEADER_PAYLOAD_LENGTH_AEAD_IV,
                 encrypted_auth_id,
@@ -188,7 +185,7 @@ class VMessAEADRequestPacketHeader:
 
         encrypted_payload_header = reader.read(length + 16)  # AEAD tag size is 16 bytes
         payload_header_key = kdf16(
-            cmd_key(uuid),
+            cmd_key(user_id),
             [
                 KDFSaltConst.VMESS_HEADER_PAYLOAD_AEAD_KEY,
                 encrypted_auth_id,
@@ -196,7 +193,7 @@ class VMessAEADRequestPacketHeader:
             ],
         )
         payload_header_nonce = kdf12(
-            cmd_key(uuid),
+            cmd_key(user_id),
             [
                 KDFSaltConst.VMESS_HEADER_PAYLOAD_AEAD_IV,
                 encrypted_auth_id,
@@ -206,15 +203,19 @@ class VMessAEADRequestPacketHeader:
         payload_header_bytes = AESGCM(payload_header_key).decrypt(
             payload_header_nonce, encrypted_payload_header, encrypted_auth_id
         )
-        payload = VMessPlainPacketHeader.read(payload_header_bytes, verify_checksum)
+        payload = VMessPlainPacketHeader.from_packet(
+            payload_header_bytes, verify_checksum
+        )
         return cls(auth_id, length, nonce, payload, reader.offset)
 
     def read_body(self, reader: BaseReader, verify_checksum: bool = True):
+        # TODO: move this function to separate class
         masker = None
         if self.payload.options & VMessBodyOptions.CHUNK_MASKING:
             masker = Shake128Stream(self.payload.body_iv)
 
         for count in itertools.count():
+            # TODO: add check if not using chunked data
             if (
                 self.payload.options & VMessBodyOptions.GLOBAL_PADDING
                 and masker is not None
@@ -300,7 +301,7 @@ class VMessResponseCommandSwitchAccount(VMessResponseCommand):
     """Host, variable length, zero length means no change"""
     port: int
     """Port, uint16, big endian"""
-    id_: uuid.UUID
+    id_: UUID
     """ID, 16 bytes"""
     alter_ids: int
     """Alter IDs, uint16, big endian"""
@@ -366,11 +367,13 @@ class VMessAEADResponsePacketHeader:
     def encode_body(
         self, request: VMessAEADRequestPacketHeader, buffer: Iterable[bytes]
     ):
+        # TODO: move this function to separate class
         masker = None
         if request.payload.options & VMessBodyOptions.CHUNK_MASKING:
             masker = Shake128Stream(self.body_iv)
 
         for count, data in zip(itertools.count(), buffer):
+            # TODO: add check if not using chunked data
             if request.payload.security is VMessBodySecurity.NONE:
                 encrypted_data = data
             elif request.payload.security is VMessBodySecurity.AES_128_CFB:
@@ -398,7 +401,7 @@ class VMessAEADResponsePacketHeader:
                 padding_length = masker.next_uint16() % 64
             else:
                 padding_length = 0
-            padding = secrets.token_bytes(padding_length)
+            padding = random_bytes(padding_length)
 
             length = len(encrypted_data) + padding_length
             if request.payload.options & VMessBodyOptions.AUTHENTICATED_LENGTH:

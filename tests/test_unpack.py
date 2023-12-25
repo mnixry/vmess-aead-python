@@ -28,7 +28,9 @@ def test_full_header():
     data = bytes.fromhex((Path(__file__).parent / "test.hex").read_text())
     reader = BufferedReader(IOReader(BytesIO(data)))
 
-    header = VMessAEADRequestPacketHeader.read(reader, user_id, timestamp=1703242500)
+    header = VMessAEADRequestPacketHeader.from_packet(
+        reader, user_id, timestamp=1703242500
+    )
     assert header.payload.address == IPv4Address("104.26.12.31")
     assert header.payload.port == 80
     body = next(header.read_body(reader))
