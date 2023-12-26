@@ -2,15 +2,11 @@
 name = "vmess-aead"
 version = "0.1.0"
 description = "VMessAEAD packet parser for python."
-authors = [
-    {name = "Mix", email = "32300164+mnixry@users.noreply.github.com"},
-]
-dependencies = [
-    "cryptography>=41.0.7",
-]
+authors = [{ name = "Mix", email = "32300164+mnixry@users.noreply.github.com" }]
+dependencies = ["cryptography>=35.0.0"]
 requires-python = ">=3.8"
 readme = "README.md"
-license = {text = "MIT"}
+license = { text = "MIT" }
 
 [build-system]
 requires = ["pdm-backend"]
@@ -20,4 +16,9 @@ build-backend = "pdm.backend"
 dev = [
     "ruff>=0.1.9",
     "pytest>=7.4.3",
+    "pytest-cov>=4.1.0",
+    "pytest-pretty>=1.2.0",
 ]
+
+[tool.pdm.scripts]
+test = { cmd = ["pytest", "--cov", "./src/", "--cov-report=term-missing", "."] }
