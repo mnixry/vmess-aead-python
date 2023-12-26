@@ -22,7 +22,15 @@ class VMessBodyEncoder:
     authenticated_length_key: Optional[bytes] = None
     authenticated_length_iv: Optional[bytes] = None
 
-    count: int = 0
+    _count: int = 0
+
+    @property
+    def count(self) -> int:
+        return self._count
+
+    @count.setter
+    def count(self, value: int):
+        self._count = value & 0xFFFF
 
     @cached_property
     def masker(self):
@@ -36,7 +44,6 @@ class VMessBodyEncoder:
 
     def encode(self, data: bytes) -> bytes:
         assert self.options & VMessBodyOptions.CHUNK_STREAM, "Not implemented"
-        assert self.count <= 0xFFFF, "Count overflow"
 
         if self.security is VMessBodySecurity.NONE:
             encrypted_data = data
@@ -99,7 +106,6 @@ class VMessBodyEncoder:
 
     def decode_once(self, reader: BaseReader, verify_checksum: bool = True) -> bytes:
         assert self.options & VMessBodyOptions.CHUNK_STREAM, "Not implemented"
-        assert self.count <= 0xFFFF, "Count overflow"
 
         if (
             self.options & VMessBodyOptions.GLOBAL_PADDING
