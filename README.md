@@ -7,10 +7,10 @@ VMessAEAD packet parser for Python.
 - [x] Body decryption
 - [x] Response packet construction
 - [ ] Async IO support
-- [ ] Packet serialization
+- [x] Packet serialization
 - [ ] Fully working implementation
   - [x] Server
     - [x] Cross Validation with the official client
-  - [ ] Client
-    - [ ] Cross Validation with the official server
+  - [x] Client
+    - [x] Cross Validation with the official server
 - [ ] ~~Legacy header (VMessMD5) compatibility~~
