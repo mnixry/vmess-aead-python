@@ -2,6 +2,8 @@ import abc
 import socket
 from typing import IO
 
+from cryptography.hazmat.primitives.ciphers import CipherContext
+
 
 class ReadOutOfBoundError(ValueError):
     pass
@@ -93,6 +95,22 @@ class IOReader(BaseReader):
 
     def read_all(self) -> bytes:
         return self._io.read()
+
+
+class StreamCipherReader(BaseReader):
+    def __init__(self, reader: BaseReader, cipher: CipherContext):
+        self._reader = reader
+        self._cipher = cipher
+        self._offset = 0
+
+    @property
+    def offset(self) -> int:
+        return self._offset
+
+    def read(self, length: int) -> bytes:
+        data = self._reader.read(length)
+        self._offset += length
+        return self._cipher.update(data)
 
 
 class SocketReader(BaseReader):
