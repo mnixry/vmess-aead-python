@@ -1,7 +1,6 @@
 from binascii import crc32
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address
-from secrets import token_bytes as random_bytes
 from typing import Optional, Union
 from uuid import UUID
 
@@ -79,6 +78,8 @@ class VMessPlainPacketHeader:
     """Address type, uint8"""
     address: Union[IPv4Address, IPv6Address, str]
     """Address, variable length"""
+    padding: bytes
+    """Padding bytes, variable length"""
 
     @classmethod
     def from_packet(cls, packet: bytes, verify_checksum: bool = True):
@@ -104,8 +105,9 @@ class VMessPlainPacketHeader:
             address = IPv6Address(reader.read_uint128())
         else:
             raise ValueError(f"Unknown address type: {address_type!r}")
+        padding = b""
         if padding_length > 0:
-            reader.read(padding_length)
+            padding = reader.read(padding_length)
         checksum_body = reader.read_before()
         checksum = reader.read_uint32()
         assert not verify_checksum or checksum == fnv1a32(checksum_body)
@@ -122,6 +124,7 @@ class VMessPlainPacketHeader:
             port,
             address_type,
             address,
+            padding,
         )
 
     def to_packet(self):
@@ -147,7 +150,7 @@ class VMessPlainPacketHeader:
         else:
             raise ValueError(f"Unknown address type: {self.address!r}")
         if self.padding_length > 0:
-            packet += random_bytes(self.padding_length)
+            packet += self.padding
         checksum = fnv1a32(packet)
         packet += checksum.to_bytes(4, "big")
         return packet

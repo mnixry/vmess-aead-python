@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from functools import cached_property
-from secrets import token_bytes as random_bytes
-from typing import Optional
+from secrets import token_bytes
+from typing import Callable, Optional
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
@@ -42,7 +42,9 @@ class VMessBodyEncoder:
     def aead_nonce(self) -> bytes:
         return self.count.to_bytes(2, "big") + self.body_iv[2:12]
 
-    def encode(self, data: bytes) -> bytes:
+    def encode(
+        self, data: bytes, padding_generator: Callable[[int], bytes] = token_bytes
+    ) -> bytes:
         assert self.options & VMessBodyOptions.CHUNK_STREAM, "Not implemented"
 
         if self.security is VMessBodySecurity.NONE:
@@ -69,7 +71,7 @@ class VMessBodyEncoder:
             padding_length = self.masker.next_uint16() % 64
         else:
             padding_length = 0
-        padding = random_bytes(padding_length)
+        padding = padding_generator(padding_length)
 
         length = len(encrypted_data) + padding_length
 

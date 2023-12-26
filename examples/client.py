@@ -44,6 +44,7 @@ header_packet = VMessAEADRequestPacketHeader(
         address="localhost",
         port=8000,
         address_type=VMessBodyAddressType.DOMAIN,
+        padding=token_bytes(10),
     ),
 )
 
