@@ -133,11 +133,9 @@ class SelectorServer:
         connection.sendall(resp_header.to_packet(resp_key, resp_iv))
 
         try:
-            connection.recv(1, socket.MSG_PEEK)
+            local_connection_callback(connection, selectors.EVENT_READ)
         except BlockingIOError:
             pass
-        else:
-            local_connection_callback(connection, selectors.EVENT_READ)
 
 
 if __name__ == "__main__":
