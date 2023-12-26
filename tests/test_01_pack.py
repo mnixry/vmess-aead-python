@@ -63,5 +63,9 @@ def test_pack():
         padding_generator=pseudo_padding,
     )
 
-    with (Path(__file__).parent / "test.hex").open("rt") as f:
-        assert bytes.fromhex(f.read()) == packet
+    assert (
+        bytes.fromhex(
+            (Path(__file__).parent / "resources" / "captured.hex").read_text()
+        )
+        == packet
+    )

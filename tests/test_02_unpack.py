@@ -32,7 +32,9 @@ def test_kdf():
 def test_full_header():
     user_id = uuid.UUID("b831381d-6324-4d53-ad4f-8cda48b30811")
 
-    data = bytes.fromhex((Path(__file__).parent / "test.hex").read_text())
+    data = bytes.fromhex(
+        (Path(__file__).parent / "resources" / "captured.hex").read_text()
+    )
     reader = BufferedReader(IOReader(BytesIO(data)))
 
     header = VMessAEADRequestPacketHeader.from_packet(
