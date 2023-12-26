@@ -6,7 +6,7 @@ from typing import Optional
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
 
-from vmess_aead.enums import VMessBodyOptions, VMessBodySecurity
+from vmess_aead.enums import VMessBodyCommand, VMessBodyOptions, VMessBodySecurity
 from vmess_aead.kdf import kdf16
 from vmess_aead.utils import Shake128Stream, fnv1a32, generate_chacha20_poly1305_key
 from vmess_aead.utils.reader import BaseReader, StreamCipherReader
@@ -18,6 +18,7 @@ class VMessBodyEncoder:
     body_iv: bytes
     options: VMessBodyOptions
     security: VMessBodySecurity
+    command: VMessBodyCommand
     authenticated_length_key: Optional[bytes] = None
     authenticated_length_iv: Optional[bytes] = None
 
@@ -50,7 +51,14 @@ class VMessBodyEncoder:
         else:
             raise ValueError(f"Unknown security: {self.security!r}")
 
-        if self.options & VMessBodyOptions.GLOBAL_PADDING and self.masker is not None:
+        if (
+            self.options & VMessBodyOptions.GLOBAL_PADDING
+            and self.masker is not None
+            and not (
+                self.security is VMessBodySecurity.NONE
+                and self.command in (VMessBodyCommand.TCP, VMessBodyCommand.MUX)
+            )
+        ):
             padding_length = self.masker.next_uint16() % 64
         else:
             padding_length = 0
@@ -93,7 +101,14 @@ class VMessBodyEncoder:
         assert self.options & VMessBodyOptions.CHUNK_STREAM, "Not implemented"
         assert self.count <= 0xFFFF, "Count overflow"
 
-        if self.options & VMessBodyOptions.GLOBAL_PADDING and self.masker is not None:
+        if (
+            self.options & VMessBodyOptions.GLOBAL_PADDING
+            and self.masker is not None
+            and not (
+                self.security is VMessBodySecurity.NONE
+                and self.command in (VMessBodyCommand.TCP, VMessBodyCommand.MUX)
+            )
+        ):
             padding_length = self.masker.next_uint16() % 64
         else:
             padding_length = 0

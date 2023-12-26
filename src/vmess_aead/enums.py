@@ -19,6 +19,7 @@ class VMessBodySecurity(IntEnum):
 class VMessBodyCommand(IntEnum):
     TCP = 0x01
     UDP = 0x02
+    MUX = 0x03
 
 
 class VMessBodyAddressType(IntEnum):
