@@ -38,6 +38,7 @@ def test_full_header():
         header.payload.body_iv,
         header.payload.options,
         header.payload.security,
+        header.payload.command,
     )
     body = encoder.decode_once(reader)
     assert (
