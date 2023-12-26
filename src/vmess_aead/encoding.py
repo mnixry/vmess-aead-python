@@ -38,9 +38,33 @@ class VMessBodyEncoder:
             return None
         return Shake128Stream(self.body_iv)
 
+    @cached_property
+    def aead(self):
+        if self.security is VMessBodySecurity.AES_128_GCM:
+            return AESGCM(self.body_key)
+        elif self.security is VMessBodySecurity.CHACHA20_POLY1305:
+            return ChaCha20Poly1305(generate_chacha20_poly1305_key(self.body_key))
+        return
+
     @property
     def aead_nonce(self) -> bytes:
         return self.count.to_bytes(2, "big") + self.body_iv[2:12]
+
+    @cached_property
+    def length_aead(self):
+        length_key = kdf16(
+            self.authenticated_length_key or self.body_key, [b"auth_len"]
+        )
+        if self.security is VMessBodySecurity.AES_128_GCM:
+            return AESGCM(length_key)
+        elif self.security is VMessBodySecurity.CHACHA20_POLY1305:
+            return ChaCha20Poly1305(generate_chacha20_poly1305_key(length_key))
+        return
+
+    @property
+    def length_aead_nonce(self) -> bytes:
+        length_iv = self.authenticated_length_iv or self.body_iv
+        return self.count.to_bytes(2, "big") + length_iv[2:12]
 
     def encode(
         self, data: bytes, padding_generator: Callable[[int], bytes] = token_bytes
@@ -51,12 +75,8 @@ class VMessBodyEncoder:
             encrypted_data = data
         elif self.security is VMessBodySecurity.AES_128_CFB:
             encrypted_data = fnv1a32(data).to_bytes(4, "big") + data
-        elif self.security is VMessBodySecurity.AES_128_GCM:
-            cipher = AESGCM(self.body_key)
-            encrypted_data = cipher.encrypt(self.aead_nonce, data, None)
-        elif self.security is VMessBodySecurity.CHACHA20_POLY1305:
-            cipher = ChaCha20Poly1305(generate_chacha20_poly1305_key(self.body_key))
-            encrypted_data = cipher.encrypt(self.aead_nonce, data, None)
+        elif self.aead is not None:
+            encrypted_data = self.aead.encrypt(self.aead_nonce, data, None)
         else:
             raise ValueError(f"Unknown security: {self.security!r}")
 
@@ -75,21 +95,12 @@ class VMessBodyEncoder:
 
         length = len(encrypted_data) + padding_length
 
-        if self.options & VMessBodyOptions.AUTHENTICATED_LENGTH:
-            length_key = self.authenticated_length_key or self.body_key
-            length_iv = self.authenticated_length_iv or self.body_iv
-            key = kdf16(length_key, [b"auth_len"])
-            nonce = self.count.to_bytes(2, "big") + length_iv[2:12]
-            if self.security is VMessBodySecurity.AES_128_GCM:
-                cipher = AESGCM(key)
-            elif self.security is VMessBodySecurity.CHACHA20_POLY1305:
-                cipher = ChaCha20Poly1305(generate_chacha20_poly1305_key(key))
-            else:
-                raise ValueError(
-                    f"Authenticated length is not supported for {self.security!r}"
-                )
-            encrypted_length = cipher.encrypt(
-                nonce, (length - 16).to_bytes(2, "big"), None
+        if (
+            self.options & VMessBodyOptions.AUTHENTICATED_LENGTH
+            and self.length_aead is not None
+        ):
+            encrypted_length = self.length_aead.encrypt(
+                self.length_aead_nonce, (length - 16).to_bytes(2, "big"), None
             )
         elif self.masker is not None:
             encrypted_length = (self.masker.next_uint16() ^ length).to_bytes(2, "big")
@@ -127,21 +138,14 @@ class VMessBodyEncoder:
             ).decryptor()
             reader = StreamCipherReader(reader, cipher)
 
-        if self.options & VMessBodyOptions.AUTHENTICATED_LENGTH:
-            length_key = self.authenticated_length_key or self.body_key
-            length_iv = self.authenticated_length_iv or self.body_iv
-            nonce = self.count.to_bytes(2, "big") + length_iv[2:12]
-            key = kdf16(length_key, [b"auth_len"])
-            if self.security is VMessBodySecurity.AES_128_GCM:
-                cipher = AESGCM(key)
-            elif self.security is VMessBodySecurity.CHACHA20_POLY1305:
-                cipher = ChaCha20Poly1305(generate_chacha20_poly1305_key(key))
-            else:
-                raise ValueError(
-                    f"Authenticated length is not supported for {self.security!r}"
-                )
-            encrypted_length = reader.read(2 + 16)  # AEAD tag size is 16 bytes
-            decrypted_length = cipher.decrypt(nonce, encrypted_length, None)
+        if (
+            self.options & VMessBodyOptions.AUTHENTICATED_LENGTH
+            and self.length_aead is not None
+        ):
+            encrypted_length = reader.read(2 + 16)
+            decrypted_length = self.length_aead.decrypt(
+                self.length_aead_nonce, encrypted_length, None
+            )
             length = int.from_bytes(decrypted_length, "big") + 16
         elif self.masker is not None:
             length = reader.read_uint16() ^ self.masker.next_uint16()
@@ -156,14 +160,9 @@ class VMessBodyEncoder:
             checksum = reader.read_uint32()
             data = reader.read(content_length - 4)
             assert not verify_checksum or checksum == fnv1a32(data)
-        elif self.security is VMessBodySecurity.AES_128_GCM:
-            cipher = AESGCM(self.body_key)
+        elif self.aead is not None:
             encrypted_data = reader.read(content_length)
-            data = cipher.decrypt(self.aead_nonce, encrypted_data, None)
-        elif self.security is VMessBodySecurity.CHACHA20_POLY1305:
-            cipher = ChaCha20Poly1305(generate_chacha20_poly1305_key(self.body_key))
-            encrypted_data = reader.read(content_length)
-            data = cipher.decrypt(self.aead_nonce, encrypted_data, None)
+            data = self.aead.decrypt(self.aead_nonce, encrypted_data, None)
         else:
             raise ValueError(f"Unknown security: {self.security!r}")
         if padding_length > 0:
