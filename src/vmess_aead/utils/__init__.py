@@ -1,6 +1,16 @@
 import hashlib
 import uuid
 from functools import lru_cache
+from typing import Optional, cast
+
+from cryptography.hazmat.backends.openssl.backend import Backend, GetCipherByName
+from cryptography.hazmat.primitives.ciphers import (
+    AEADDecryptionContext,
+    AEADEncryptionContext,
+    Cipher,
+    algorithms,
+    modes,
+)
 
 
 @lru_cache(maxsize=1)
@@ -54,3 +64,48 @@ def generate_chacha20_poly1305_key(b: bytes) -> bytes:
     key = hashlib.md5(b).digest()
     key += hashlib.md5(key).digest()
     return key
+
+
+class SM4GCM:
+    def __init__(self, key: bytes) -> None:
+        assert len(key) == 16
+        self._algorithm = algorithms.SM4(key)
+        self._backend = Backend()
+        self._backend.register_cipher_adapter(
+            algorithms.SM4, modes.GCM, GetCipherByName("sm4-{mode.name}")
+        )
+
+    def encrypt(
+        self, nonce: bytes, data: bytes, associated_data: Optional[bytes]
+    ) -> bytes:
+        assert len(nonce) == 12
+        cipher = Cipher(self._algorithm, (mode := modes.GCM(nonce)))
+        encryptor = cast(
+            AEADEncryptionContext,
+            cipher._wrap_ctx(
+                self._backend.create_symmetric_encryption_ctx(self._algorithm, mode),
+                encrypt=True,
+            ),
+        )
+        if associated_data is not None:
+            encryptor.authenticate_additional_data(associated_data)
+        return encryptor.update(data) + encryptor.finalize()
+
+    def decrypt(
+        self,
+        nonce: bytes,
+        data: bytes,
+        associated_data: Optional[bytes],
+    ) -> bytes:
+        assert len(nonce) == 12
+        cipher = Cipher(self._algorithm, (mode := modes.GCM(nonce)))
+        decryptor = cast(
+            AEADDecryptionContext,
+            cipher._wrap_ctx(
+                self._backend.create_symmetric_encryption_ctx(self._algorithm, mode),
+                encrypt=True,
+            ),
+        )
+        if associated_data is not None:
+            decryptor.authenticate_additional_data(associated_data)
+        return decryptor.update(data) + decryptor.finalize()
