@@ -22,7 +22,7 @@ class VMessResponseCommand(abc.ABC):
         if command_id == 0x00:
             return None
         elif command_id not in command_registries:
-            raise ValueError(f"unknown command id {command_id}")
+            raise ValueError(f"unknown command id {command_id}")  # pragma: no cover
         checksum = reader.read_uint32()
         command_packet = reader.read(length)
         assert not verify_checksum or checksum == fnv1a32(command_packet)
@@ -31,7 +31,7 @@ class VMessResponseCommand(abc.ABC):
     @classmethod
     @abc.abstractmethod
     def from_packet(cls, command_id: int, packet: bytes) -> "VMessResponseCommand":
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
     def _wrap(self, command_packet: bytes):
         packet = b""
@@ -43,7 +43,7 @@ class VMessResponseCommand(abc.ABC):
 
     @abc.abstractmethod
     def to_packet(self):
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
 
 @dataclass

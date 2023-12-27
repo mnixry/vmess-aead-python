@@ -24,15 +24,15 @@ _T = TypeVar("_T")
 class VMessHash(abc.ABC):
     @abc.abstractmethod
     def update(self, data: bytes) -> None:
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
     @abc.abstractmethod
     def digest(self) -> bytes:
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
     @abc.abstractmethod
     def copy(self: _T) -> _T:
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
 
 class Sha256Hash(VMessHash):

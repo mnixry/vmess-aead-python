@@ -44,7 +44,7 @@ class VMessBodyEncoder:
             return AESGCM(self.body_key)
         elif self.security is VMessBodySecurity.CHACHA20_POLY1305:
             return ChaCha20Poly1305(generate_chacha20_poly1305_key(self.body_key))
-        return
+        return  # pragma: no cover
 
     @property
     def aead_nonce(self) -> bytes:
@@ -78,7 +78,7 @@ class VMessBodyEncoder:
         elif self.aead is not None:
             encrypted_data = self.aead.encrypt(self.aead_nonce, data, None)
         else:
-            raise ValueError(f"Unknown security: {self.security!r}")
+            raise ValueError(f"Unknown security: {self.security!r}")  # pragma: no cover
 
         if (
             self.options & VMessBodyOptions.GLOBAL_PADDING
@@ -164,7 +164,7 @@ class VMessBodyEncoder:
             encrypted_data = reader.read(content_length)
             data = self.aead.decrypt(self.aead_nonce, encrypted_data, None)
         else:
-            raise ValueError(f"Unknown security: {self.security!r}")
+            raise ValueError(f"Unknown security: {self.security!r}")  # pragma: no cover
         if padding_length > 0:
             reader.read(padding_length)
         self.count += 1

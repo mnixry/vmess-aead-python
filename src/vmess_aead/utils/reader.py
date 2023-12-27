@@ -12,11 +12,11 @@ class ReadOutOfBoundError(ValueError):
 class BaseReader(abc.ABC):
     @abc.abstractproperty
     def offset(self) -> int:
-        raise NotImplementedError()
+        raise NotImplementedError()  # pragma: no cover
 
     @abc.abstractmethod
     def read(self, length: int) -> bytes:
-        raise NotImplementedError()
+        raise NotImplementedError()  # pragma: no cover
 
     def read_byte(self) -> int:
         return self.read(1)[0]

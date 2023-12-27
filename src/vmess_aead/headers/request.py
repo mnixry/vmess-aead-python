@@ -104,7 +104,9 @@ class VMessPlainPacketHeader:
         elif address_type is VMessBodyAddressType.IPV6:
             address = IPv6Address(reader.read_uint128())
         else:
-            raise ValueError(f"Unknown address type: {address_type!r}")
+            raise ValueError(
+                f"Unknown address type: {address_type!r}"
+            )  # pragma: no cover
         padding = b""
         if padding_length > 0:
             padding = reader.read(padding_length)
@@ -148,7 +150,9 @@ class VMessPlainPacketHeader:
         elif isinstance(self.address, IPv6Address):
             packet += self.address.packed
         else:
-            raise ValueError(f"Unknown address type: {self.address!r}")
+            raise ValueError(
+                f"Unknown address type: {self.address!r}"
+            )  # pragma: no cover
         if self.padding_length > 0:
             packet += self.padding
         checksum = fnv1a32(packet)
