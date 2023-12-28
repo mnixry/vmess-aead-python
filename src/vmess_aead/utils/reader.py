@@ -12,11 +12,11 @@ class ReadOutOfBoundError(ValueError):
 class BaseReader(abc.ABC):
     @abc.abstractproperty
     def offset(self) -> int:
-        raise NotImplementedError()  # pragma: no cover
+        raise NotImplementedError  # pragma: no cover
 
     @abc.abstractmethod
     def read(self, length: int) -> bytes:
-        raise NotImplementedError()  # pragma: no cover
+        raise NotImplementedError  # pragma: no cover
 
     def read_byte(self) -> int:
         return self.read(1)[0]
@@ -33,25 +33,30 @@ class BaseReader(abc.ABC):
     def read_uint128(self) -> int:
         return int.from_bytes(self.read(16), "big")
 
+    @abc.abstractmethod
+    def read_all(self) -> bytes:
+        raise NotImplementedError  # pragma: no cover
+
 
 class BufferedReader(BaseReader):
     def __init__(self, reader: BaseReader):
         self._reader = reader
         self._buffer = b""
-        self._offset = 0
 
     @property
     def offset(self) -> int:
-        return self._offset
+        return self._reader.offset
 
     def read(self, length: int) -> bytes:
         received = self._reader.read(length)
         self._buffer += received
-        self._offset += length
         return received
 
     def read_before(self) -> bytes:
-        return self._buffer[: self._offset]
+        return self._buffer[: self.offset]
+
+    def read_all(self) -> bytes:
+        return self._reader.read_all()
 
 
 class BytesReader(BaseReader):
@@ -94,7 +99,9 @@ class IOReader(BaseReader):
         return result
 
     def read_all(self) -> bytes:
-        return self._io.read()
+        data = self._io.read()
+        self._offset += len(data)
+        return data
 
 
 class StreamCipherReader(BaseReader):
@@ -110,6 +117,11 @@ class StreamCipherReader(BaseReader):
     def read(self, length: int) -> bytes:
         data = self._reader.read(length)
         self._offset += length
+        return self._cipher.update(data)
+
+    def read_all(self) -> bytes:
+        data = self._reader.read_all()
+        self._offset += len(data)
         return self._cipher.update(data)
 
 
@@ -137,8 +149,9 @@ class SocketReader(BaseReader):
 
     def read_all(self) -> bytes:
         while True:
-            received = self._socket.recv(self._buffer_size)
-            if not received:
+            self._buffer += (received := self._socket.recv(self._buffer_size))
+            if len(received) < self._buffer_size:
                 break
-            self._buffer += received
-        return self._buffer
+        self._offset += len(self._buffer)
+        data, self._buffer = self._buffer, b""
+        return data

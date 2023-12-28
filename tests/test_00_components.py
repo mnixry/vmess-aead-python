@@ -36,6 +36,7 @@ def test_bytes_reader():
     assert reader.offset == 5
     assert reader.read_before() == b"12345"
     assert reader.read_all() == b"67890"
+    assert reader.offset == 10
 
     with pytest.raises(ReadOutOfBoundError):
         reader.read(5)
@@ -46,7 +47,8 @@ def test_buffered_reader():
     assert reader.read(5) == b"12345"
     assert reader.offset == 5
     assert reader.read_before() == b"12345"
-    assert reader.read(5) == b"67890"
+    assert reader.read_all() == b"67890"
+    assert reader.offset == 10
 
     with pytest.raises(ReadOutOfBoundError):
         reader.read(5)
@@ -57,6 +59,7 @@ def test_io_reader():
     assert reader.read(5) == b"12345"
     assert reader.offset == 5
     assert reader.read_all() == b"67890"
+    assert reader.offset == 10
 
     with pytest.raises(ReadOutOfBoundError):
         reader.read(5)
@@ -71,7 +74,8 @@ def test_stream_cipher_reader():
     )
     assert reader.read(5) == b"12345"
     assert reader.offset == 5
-    assert reader.read(5) == b"67890"
+    assert reader.read_all() == b"67890"
+    assert reader.offset == 10
 
     with pytest.raises(ReadOutOfBoundError):
         reader.read(5)
@@ -92,6 +96,7 @@ def test_socket_reader():
     assert reader.read(5) == b"12345"
     assert reader.offset == 5
     assert reader.read(5) == b"67890"
+    assert reader.offset == 10
 
     with pytest.raises(ReadOutOfBoundError):
         reader.read(5)
@@ -106,6 +111,7 @@ def test_socket_reader():
     assert reader.read(5) == b"12345"
     assert reader.offset == 5
     assert reader.read_all() == b"67890"
+    assert reader.offset == 10
 
 
 def test_sm4_gcm():
