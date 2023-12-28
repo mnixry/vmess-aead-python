@@ -90,10 +90,12 @@ class SM4GCM:
         tag: Optional[bytes] = None,
     ) -> bytes:
         assert len(nonce) == 12
-        tag = tag or data[-16:]
+        if tag is None:
+            tag = tag or data[-16:]
+            data = data[:-16]
         decryptor = self._backend.create_symmetric_decryption_ctx(
             self._algorithm, modes.GCM(nonce, tag)
         )
         if associated_data is not None:
             decryptor.authenticate_additional_data(associated_data)
-        return decryptor.update(data) + decryptor.finalize_with_tag(tag)
+        return decryptor.update(data) + decryptor.finalize()

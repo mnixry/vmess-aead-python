@@ -4,6 +4,7 @@ from enum import IntEnum, IntFlag
 class VMessBodyOptions(IntFlag):
     CHUNK_STREAM = 0x01
     CONNECTION_REUSE = 0x02
+    """DEPRECATED, not implemented"""
     CHUNK_MASKING = 0x04
     GLOBAL_PADDING = 0x08
     AUTHENTICATED_LENGTH = 0x10
@@ -14,6 +15,9 @@ class VMessBodySecurity(IntEnum):
     AES_128_GCM = 0x03
     CHACHA20_POLY1305 = 0x04
     NONE = 0x05
+
+    SM4_GCM = 0x0A
+    """extensive implementation, not applicable to V2Ray Core"""
 
 
 class VMessBodyCommand(IntEnum):
@@ -30,4 +34,4 @@ class VMessBodyAddressType(IntEnum):
 
 class VMessResponseBodyOptions(IntFlag):
     TCP_REUSE = 0x01
-    """DEPRECATED"""
+    """DEPRECATED, not implemented"""

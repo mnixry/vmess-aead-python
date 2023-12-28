@@ -8,7 +8,12 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
 
 from vmess_aead.enums import VMessBodyCommand, VMessBodyOptions, VMessBodySecurity
 from vmess_aead.kdf import kdf16
-from vmess_aead.utils import Shake128Stream, fnv1a32, generate_chacha20_poly1305_key
+from vmess_aead.utils import (
+    SM4GCM,
+    Shake128Stream,
+    fnv1a32,
+    generate_chacha20_poly1305_key,
+)
 from vmess_aead.utils.reader import BaseReader, StreamCipherReader
 
 
@@ -42,7 +47,9 @@ class VMessBodyEncoder:
             return AESGCM(self.body_key)
         elif self.security is VMessBodySecurity.CHACHA20_POLY1305:
             return ChaCha20Poly1305(generate_chacha20_poly1305_key(self.body_key))
-        return  # pragma: no cover
+        elif self.security is VMessBodySecurity.SM4_GCM:
+            return SM4GCM(self.body_key)
+        return
 
     @property
     def aead_nonce(self) -> bytes:
@@ -57,6 +64,8 @@ class VMessBodyEncoder:
             return AESGCM(length_key)
         elif self.security is VMessBodySecurity.CHACHA20_POLY1305:
             return ChaCha20Poly1305(generate_chacha20_poly1305_key(length_key))
+        elif self.security is VMessBodySecurity.SM4_GCM:
+            return SM4GCM(length_key)
         return
 
     @property
@@ -83,12 +92,12 @@ class VMessBodyEncoder:
             elif self.security is VMessBodySecurity.NONE:
                 return data
 
-        if self.security is VMessBodySecurity.NONE:
-            encrypted_data = data
-        elif self.security is VMessBodySecurity.AES_128_CFB:
+        if self.security is VMessBodySecurity.AES_128_CFB:
             encrypted_data = fnv1a32(data).to_bytes(4, "big") + data
         elif self.aead is not None:
             encrypted_data = self.aead.encrypt(self.aead_nonce, data, None)
+        elif self.security is VMessBodySecurity.NONE:
+            encrypted_data = data
         else:
             raise ValueError(f"Unknown security: {self.security!r}")  # pragma: no cover
 
@@ -159,17 +168,23 @@ class VMessBodyEncoder:
 
         content_length = length - padding_length
 
-        if self.security is VMessBodySecurity.NONE:
-            data = reader.read(content_length)
-        elif self.security is VMessBodySecurity.AES_128_CFB:
+        if self.security is VMessBodySecurity.AES_128_CFB:
             checksum = reader.read_uint32()
             data = reader.read(content_length - 4)
             assert not verify_checksum or checksum == fnv1a32(data)
         elif self.aead is not None:
             encrypted_data = reader.read(content_length)
             data = self.aead.decrypt(self.aead_nonce, encrypted_data, None)
+        elif self.security is VMessBodySecurity.NONE:
+            data = reader.read(content_length)
         else:
             raise ValueError(f"Unknown security: {self.security!r}")  # pragma: no cover
+
+        if padding_length > 0:
+            reader.read(padding_length)
+        self.count += 1
+        return data
+
         if padding_length > 0:
             reader.read(padding_length)
         self.count += 1

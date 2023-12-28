@@ -88,7 +88,16 @@ def v2ray_server(v2ray_core: Path):
     ),
     ids=lambda x: x.name,
 )
-@pytest.mark.parametrize("security", [*VMessBodySecurity], ids=lambda x: x.name)
+@pytest.mark.parametrize(
+    "security",
+    [
+        VMessBodySecurity.AES_128_CFB,
+        VMessBodySecurity.AES_128_GCM,
+        VMessBodySecurity.CHACHA20_POLY1305,
+        VMessBodySecurity.NONE,
+    ],
+    ids=lambda x: x.name,
+)
 def test_as_client(
     v2ray_server: subprocess.Popen,
     options: VMessBodyOptions,
