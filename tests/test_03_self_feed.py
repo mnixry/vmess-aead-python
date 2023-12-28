@@ -1,4 +1,5 @@
 import hashlib
+import itertools
 import time
 from ipaddress import IPv4Address, IPv6Address
 from secrets import randbits, token_bytes
@@ -21,21 +22,28 @@ from vmess_aead.headers.response import VMessResponseCommandSwitchAccount
 from vmess_aead.utils.reader import BytesReader
 
 
+def bitmask_combination(*enums: VMessBodyOptions):
+    return {
+        VMessBodyOptions(sum(x))
+        for i in range(len(enums) + 1)
+        for x in itertools.combinations(enums, i)
+    }
+
+
 @pytest.mark.parametrize(
     "options",
     [
-        VMessBodyOptions.CHUNK_STREAM,
-        VMessBodyOptions.CHUNK_STREAM | VMessBodyOptions.CHUNK_MASKING,
-        VMessBodyOptions.CHUNK_STREAM
-        | VMessBodyOptions.CHUNK_MASKING
-        | VMessBodyOptions.GLOBAL_PADDING,
-        VMessBodyOptions.CHUNK_STREAM
-        | VMessBodyOptions.CHUNK_MASKING
-        | VMessBodyOptions.AUTHENTICATED_LENGTH,
-        VMessBodyOptions.CHUNK_STREAM
-        | VMessBodyOptions.CHUNK_MASKING
-        | VMessBodyOptions.AUTHENTICATED_LENGTH
-        | VMessBodyOptions.GLOBAL_PADDING,
+        opt
+        for opt in bitmask_combination(
+            VMessBodyOptions.CHUNK_STREAM,
+            VMessBodyOptions.CHUNK_MASKING,
+            VMessBodyOptions.GLOBAL_PADDING,
+            VMessBodyOptions.AUTHENTICATED_LENGTH,
+        )
+        if not (
+            opt & VMessBodyOptions.GLOBAL_PADDING
+            and not opt & VMessBodyOptions.CHUNK_MASKING
+        )
     ],
     ids=lambda x: x.name,
 )

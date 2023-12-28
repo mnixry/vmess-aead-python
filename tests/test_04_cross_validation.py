@@ -1,4 +1,5 @@
 import hashlib
+import itertools
 import platform
 import socket
 import subprocess
@@ -32,6 +33,16 @@ if platform.system() != "Linux" or platform.machine() != "x86_64":
 
 
 RESOURCES_DIR = Path(__file__).parent / "resources"
+
+
+def bitmask_combination(
+    *enums: VMessBodyOptions, extra: VMessBodyOptions = VMessBodyOptions(0)
+):
+    return {
+        VMessBodyOptions(sum(x) | extra)
+        for i in range(len(enums) + 1)
+        for x in itertools.combinations(enums, i)
+    }
 
 
 @pytest.fixture(scope="module")
@@ -69,20 +80,12 @@ def v2ray_server(v2ray_core: Path):
 
 @pytest.mark.parametrize(
     "options",
-    [
-        VMessBodyOptions.CHUNK_STREAM,
-        VMessBodyOptions.CHUNK_STREAM | VMessBodyOptions.CHUNK_MASKING,
-        VMessBodyOptions.CHUNK_STREAM
-        | VMessBodyOptions.CHUNK_MASKING
-        | VMessBodyOptions.GLOBAL_PADDING,
-        VMessBodyOptions.CHUNK_STREAM
-        | VMessBodyOptions.CHUNK_MASKING
-        | VMessBodyOptions.AUTHENTICATED_LENGTH,
-        VMessBodyOptions.CHUNK_STREAM
-        | VMessBodyOptions.CHUNK_MASKING
-        | VMessBodyOptions.AUTHENTICATED_LENGTH
-        | VMessBodyOptions.GLOBAL_PADDING,
-    ],
+    bitmask_combination(
+        VMessBodyOptions.CHUNK_MASKING,
+        VMessBodyOptions.GLOBAL_PADDING,
+        VMessBodyOptions.AUTHENTICATED_LENGTH,
+        extra=VMessBodyOptions.CHUNK_STREAM,  # TODO: make it being a part of test
+    ),
     ids=lambda x: x.name,
 )
 @pytest.mark.parametrize("security", [*VMessBodySecurity], ids=lambda x: x.name)
@@ -93,10 +96,13 @@ def test_as_client(
 ):
     client = socket.socket()
     client.connect(("localhost", 10086))
+    client.settimeout(5)
 
     server = socket.socket()
     server.bind(("localhost", 0))
-    server.listen(10)
+    server.listen(1)
+    server.settimeout(2)
+
     _, port = server.getsockname()
 
     header_packet = VMessAEADRequestPacketHeader(
@@ -128,9 +134,17 @@ def test_as_client(
         )
     )
 
-    server_connection, addr = server.accept()
-    server_connection.sendall(b"ok")
+    if (
+        options & VMessBodyOptions.GLOBAL_PADDING
+        and not options & VMessBodyOptions.CHUNK_MASKING
+    ):
+        with pytest.raises(socket.timeout):
+            server_connection, addr = server.accept()
+        return
+    else:
+        server_connection, addr = server.accept()
     server_connection.settimeout(5)
+    server_connection.send(b"ok")
 
     reader = SocketReader(client)
     resp_iv = hashlib.sha256(header_packet.payload.body_iv).digest()[0:16]
@@ -178,6 +192,6 @@ def test_as_client(
         assert recv_data == data, f"Round {r} failed"
 
 
+@pytest.mark.skip("TODO")
 def test_as_server():
-    # TODO
     pass

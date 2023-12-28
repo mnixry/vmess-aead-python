@@ -76,7 +76,12 @@ class VMessBodyEncoder:
     def encode(
         self, data: bytes, padding_generator: Callable[[int], bytes] = token_bytes
     ) -> bytes:
-        assert self.options & VMessBodyOptions.CHUNK_STREAM, "Not implemented"
+        if not self.options & VMessBodyOptions.CHUNK_STREAM:
+            if self.cipher_pair is not None:
+                encryptor, _ = self.cipher_pair
+                return encryptor.update(data)
+            elif self.security is VMessBodySecurity.NONE:
+                return data
 
         if self.security is VMessBodySecurity.NONE:
             encrypted_data = data
@@ -119,7 +124,16 @@ class VMessBodyEncoder:
         return packet
 
     def decode_once(self, reader: BaseReader, verify_checksum: bool = True) -> bytes:
-        assert self.options & VMessBodyOptions.CHUNK_STREAM, "Not implemented"
+        if self.cipher_pair is not None:
+            _, decryptor = self.cipher_pair
+            reader = StreamCipherReader(reader, decryptor)
+
+        if not self.options & VMessBodyOptions.CHUNK_STREAM:
+            if (
+                isinstance(reader, StreamCipherReader)
+                or self.security is VMessBodySecurity.NONE
+            ):
+                return reader.read_all()
 
         if self.options & VMessBodyOptions.GLOBAL_PADDING and not (
             self.security is VMessBodySecurity.NONE
@@ -128,10 +142,6 @@ class VMessBodyEncoder:
             padding_length = self.masker.next_uint16() % 64
         else:
             padding_length = 0
-
-        if self.cipher_pair is not None:
-            _, decryptor = self.cipher_pair
-            reader = StreamCipherReader(reader, decryptor)
 
         if (
             self.options & VMessBodyOptions.AUTHENTICATED_LENGTH
