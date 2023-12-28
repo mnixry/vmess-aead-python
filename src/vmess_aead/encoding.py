@@ -34,8 +34,6 @@ class VMessBodyEncoder:
 
     @cached_property
     def masker(self):
-        if not self.options & VMessBodyOptions.CHUNK_MASKING:
-            return None
         return Shake128Stream(self.body_iv)
 
     @cached_property
@@ -66,6 +64,15 @@ class VMessBodyEncoder:
         length_iv = self.authenticated_length_iv or self.body_iv
         return self.count.to_bytes(2, "big") + length_iv[2:12]
 
+    @cached_property
+    def cipher_pair(self):
+        if self.security is not VMessBodySecurity.AES_128_CFB:
+            return
+        return (
+            Cipher(algorithms.AES(self.body_key), modes.CFB(self.body_iv)).encryptor(),
+            Cipher(algorithms.AES(self.body_key), modes.CFB(self.body_iv)).decryptor(),
+        )
+
     def encode(
         self, data: bytes, padding_generator: Callable[[int], bytes] = token_bytes
     ) -> bytes:
@@ -80,13 +87,9 @@ class VMessBodyEncoder:
         else:
             raise ValueError(f"Unknown security: {self.security!r}")  # pragma: no cover
 
-        if (
-            self.options & VMessBodyOptions.GLOBAL_PADDING
-            and self.masker is not None
-            and not (
-                self.security is VMessBodySecurity.NONE
-                and self.command in (VMessBodyCommand.TCP, VMessBodyCommand.MUX)
-            )
+        if self.options & VMessBodyOptions.GLOBAL_PADDING and not (
+            self.security is VMessBodySecurity.NONE
+            and self.command in (VMessBodyCommand.TCP, VMessBodyCommand.MUX)
         ):
             padding_length = self.masker.next_uint16() % 64
         else:
@@ -102,17 +105,15 @@ class VMessBodyEncoder:
             encrypted_length = self.length_aead.encrypt(
                 self.length_aead_nonce, (length - 16).to_bytes(2, "big"), None
             )
-        elif self.masker is not None:
+        elif self.options & VMessBodyOptions.CHUNK_MASKING:
             encrypted_length = (self.masker.next_uint16() ^ length).to_bytes(2, "big")
         else:
             encrypted_length = length.to_bytes(2, "big")
 
         packet = encrypted_length + encrypted_data + padding
-        if self.security is VMessBodySecurity.AES_128_CFB:
-            cipher = Cipher(
-                algorithms.AES(self.body_key), modes.CFB(self.body_iv)
-            ).encryptor()
-            packet = cipher.update(packet) + cipher.finalize()
+        if self.cipher_pair is not None:
+            encryptor, _ = self.cipher_pair
+            packet = encryptor.update(packet)
 
         self.count += 1
         return packet
@@ -120,23 +121,17 @@ class VMessBodyEncoder:
     def decode_once(self, reader: BaseReader, verify_checksum: bool = True) -> bytes:
         assert self.options & VMessBodyOptions.CHUNK_STREAM, "Not implemented"
 
-        if (
-            self.options & VMessBodyOptions.GLOBAL_PADDING
-            and self.masker is not None
-            and not (
-                self.security is VMessBodySecurity.NONE
-                and self.command in (VMessBodyCommand.TCP, VMessBodyCommand.MUX)
-            )
+        if self.options & VMessBodyOptions.GLOBAL_PADDING and not (
+            self.security is VMessBodySecurity.NONE
+            and self.command in (VMessBodyCommand.TCP, VMessBodyCommand.MUX)
         ):
             padding_length = self.masker.next_uint16() % 64
         else:
             padding_length = 0
 
-        if self.security is VMessBodySecurity.AES_128_CFB:
-            cipher = Cipher(
-                algorithms.AES(self.body_key), modes.CFB(self.body_iv)
-            ).decryptor()
-            reader = StreamCipherReader(reader, cipher)
+        if self.cipher_pair is not None:
+            _, decryptor = self.cipher_pair
+            reader = StreamCipherReader(reader, decryptor)
 
         if (
             self.options & VMessBodyOptions.AUTHENTICATED_LENGTH
@@ -147,7 +142,7 @@ class VMessBodyEncoder:
                 self.length_aead_nonce, encrypted_length, None
             )
             length = int.from_bytes(decrypted_length, "big") + 16
-        elif self.masker is not None:
+        elif self.options & VMessBodyOptions.CHUNK_MASKING:
             length = reader.read_uint16() ^ self.masker.next_uint16()
         else:
             length = reader.read_uint16()
