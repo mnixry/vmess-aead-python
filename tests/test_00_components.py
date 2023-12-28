@@ -102,7 +102,7 @@ def test_socket_reader():
     client.close()
 
     connection, src_addr = server.accept()
-    reader = SocketReader(connection)
+    reader = SocketReader(connection, buffer_size=2)
     assert reader.read(5) == b"12345"
     assert reader.offset == 5
     assert reader.read_all() == b"67890"
@@ -113,19 +113,20 @@ def test_sm4_gcm():
     key = bytes.fromhex("0123456789ABCDEFFEDCBA9876543210")
     nonce = bytes.fromhex("00001234567800000000ABCD")
     associated_data = bytes.fromhex("FEEDFACEDEADBEEFFEEDFACEDEADBEEFABADDAD2")
-    plaintext = bytes.fromhex(
+    plain_text = bytes.fromhex(
         "AAAAAAAAAAAAAAAABBBBBBBBBBBBBBBB"
         "CCCCCCCCCCCCCCCCDDDDDDDDDDDDDDDD"
         "EEEEEEEEEEEEEEEEFFFFFFFFFFFFFFFF"
         "EEEEEEEEEEEEEEEEAAAAAAAAAAAAAAAA"
     )
-    ciphertext = bytes.fromhex(
+    cipher_text = bytes.fromhex(
         "17F399F08C67D5EE19D0DC9969C4BB7D"
         "5FD46FD3756489069157B282BB200735"
         "D82710CA5C22F0CCFA7CBF93D496AC15"
         "A56834CBCF98C397B4024A2691233B8D"
     )
+    tag = bytes.fromhex("83DE3541E4C2B58177E065A9BF7B62EC")
 
     sm4gcm = SM4GCM(key)
-    assert sm4gcm.encrypt(nonce, plaintext, associated_data) == ciphertext
-    assert sm4gcm.decrypt(nonce, ciphertext, associated_data) == plaintext
+    assert sm4gcm.encrypt(nonce, plain_text, associated_data) == cipher_text + tag
+    assert sm4gcm.decrypt(nonce, cipher_text, associated_data, tag) == plain_text

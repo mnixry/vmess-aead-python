@@ -1,16 +1,10 @@
 import hashlib
 import uuid
 from functools import lru_cache
-from typing import Optional, cast
+from typing import Optional
 
 from cryptography.hazmat.backends.openssl.backend import Backend, GetCipherByName
-from cryptography.hazmat.primitives.ciphers import (
-    AEADDecryptionContext,
-    AEADEncryptionContext,
-    Cipher,
-    algorithms,
-    modes,
-)
+from cryptography.hazmat.primitives.ciphers import algorithms, modes
 
 
 @lru_cache(maxsize=1)
@@ -79,33 +73,27 @@ class SM4GCM:
         self, nonce: bytes, data: bytes, associated_data: Optional[bytes]
     ) -> bytes:
         assert len(nonce) == 12
-        cipher = Cipher(self._algorithm, (mode := modes.GCM(nonce)))
-        encryptor = cast(
-            AEADEncryptionContext,
-            cipher._wrap_ctx(
-                self._backend.create_symmetric_encryption_ctx(self._algorithm, mode),
-                encrypt=True,
-            ),
+        encryptor = self._backend.create_symmetric_encryption_ctx(
+            self._algorithm, modes.GCM(nonce)
         )
         if associated_data is not None:
             encryptor.authenticate_additional_data(associated_data)
-        return encryptor.update(data) + encryptor.finalize()
+        cipher_text = encryptor.update(data) + encryptor.finalize()
+        assert encryptor.tag is not None
+        return cipher_text + encryptor.tag
 
     def decrypt(
         self,
         nonce: bytes,
         data: bytes,
         associated_data: Optional[bytes],
+        tag: Optional[bytes] = None,
     ) -> bytes:
         assert len(nonce) == 12
-        cipher = Cipher(self._algorithm, (mode := modes.GCM(nonce)))
-        decryptor = cast(
-            AEADDecryptionContext,
-            cipher._wrap_ctx(
-                self._backend.create_symmetric_encryption_ctx(self._algorithm, mode),
-                encrypt=True,
-            ),
+        tag = tag or data[-16:]
+        decryptor = self._backend.create_symmetric_decryption_ctx(
+            self._algorithm, modes.GCM(nonce, tag)
         )
         if associated_data is not None:
             decryptor.authenticate_additional_data(associated_data)
-        return decryptor.update(data) + decryptor.finalize()
+        return decryptor.update(data) + decryptor.finalize_with_tag(tag)
