@@ -6,6 +6,7 @@ from typing import Optional
 from uuid import uuid4
 
 import pytest
+
 from vmess_aead import VMessAEADRequestPacketHeader, VMessAEADResponsePacketHeader
 from vmess_aead.encoding import VMessBodyEncoder
 from vmess_aead.enums import (
@@ -36,9 +37,10 @@ from vmess_aead.utils.reader import BytesReader
         | VMessBodyOptions.AUTHENTICATED_LENGTH
         | VMessBodyOptions.GLOBAL_PADDING,
     ],
+    ids=lambda x: x.name,
 )
-@pytest.mark.parametrize("security", [*VMessBodySecurity])
-@pytest.mark.parametrize("command", [*VMessBodyCommand])
+@pytest.mark.parametrize("security", [*VMessBodySecurity], ids=lambda x: x.name)
+@pytest.mark.parametrize("command", [*VMessBodyCommand], ids=lambda x: x.name)
 @pytest.mark.parametrize(
     "address_type, address",
     [
@@ -46,6 +48,7 @@ from vmess_aead.utils.reader import BytesReader
         (VMessBodyAddressType.DOMAIN, "example.com"),
         (VMessBodyAddressType.IPV6, IPv6Address("::1")),
     ],
+    ids=lambda x: x.name if isinstance(x, VMessBodyAddressType) else type(x).__name__,
 )
 @pytest.mark.parametrize(
     "resp_command",
@@ -61,6 +64,7 @@ from vmess_aead.utils.reader import BytesReader
             valid_minutes=32,
         ),
     ],
+    ids=lambda x: type(x).__name__ if x is not None else None,
 )
 def test_feed(
     options: VMessBodyOptions,
