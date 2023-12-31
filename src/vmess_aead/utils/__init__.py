@@ -60,6 +60,10 @@ def generate_chacha20_poly1305_key(b: bytes) -> bytes:
     return key
 
 
+def generate_response_key(b: bytes) -> bytes:
+    return hashlib.sha256(b).digest()[0:16]
+
+
 class SM4GCM:
     def __init__(self, key: bytes) -> None:
         assert len(key) == 16

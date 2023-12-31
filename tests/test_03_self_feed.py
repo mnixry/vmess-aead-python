@@ -1,4 +1,3 @@
-import hashlib
 import itertools
 import time
 from ipaddress import IPv4Address, IPv6Address
@@ -19,6 +18,7 @@ from vmess_aead.enums import (
 )
 from vmess_aead.headers.request import VMessAuthID, VMessPlainPacketHeader
 from vmess_aead.headers.response import VMessResponseCommandSwitchAccount
+from vmess_aead.utils import generate_response_key
 from vmess_aead.utils.reader import BytesReader
 
 
@@ -116,8 +116,8 @@ def test_feed(
         options=VMessResponseBodyOptions(0),
         command=resp_command,
     )
-    resp_body_key = hashlib.sha256(header.payload.body_key).digest()[0:16]
-    resp_body_iv = hashlib.sha256(header.payload.body_iv).digest()[0:16]
+    resp_body_key = generate_response_key(header.payload.body_key)
+    resp_body_iv = generate_response_key(header.payload.body_iv)
     resp_packet = resp_header.to_packet(resp_body_key, resp_body_iv)
 
     assert (

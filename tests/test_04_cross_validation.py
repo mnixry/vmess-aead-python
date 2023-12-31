@@ -1,4 +1,3 @@
-import hashlib
 import itertools
 import platform
 import socket
@@ -26,6 +25,7 @@ from vmess_aead.headers.request import (
     VMessPlainPacketHeader,
 )
 from vmess_aead.headers.response import VMessAEADResponsePacketHeader
+from vmess_aead.utils import generate_response_key
 from vmess_aead.utils.reader import SocketReader
 
 if platform.system() != "Linux" or platform.machine() != "x86_64":
@@ -156,8 +156,8 @@ def test_as_client(
     server_connection.send(b"ok")
 
     reader = SocketReader(client)
-    resp_iv = hashlib.sha256(header_packet.payload.body_iv).digest()[0:16]
-    resp_key = hashlib.sha256(header_packet.payload.body_key).digest()[0:16]
+    resp_iv = generate_response_key(header_packet.payload.body_iv)
+    resp_key = generate_response_key(header_packet.payload.body_key)
     resp_header = VMessAEADResponsePacketHeader.from_packet(
         reader, body_iv=resp_iv, body_key=resp_key
     )
