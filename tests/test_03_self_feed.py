@@ -6,7 +6,6 @@ from typing import Optional
 from uuid import uuid4
 
 import pytest
-
 from vmess_aead import VMessAEADRequestPacketHeader, VMessAEADResponsePacketHeader
 from vmess_aead.encoding import VMessBodyEncoder
 from vmess_aead.enums import (

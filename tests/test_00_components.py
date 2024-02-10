@@ -3,7 +3,6 @@ from io import BytesIO
 
 import pytest
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-
 from vmess_aead.kdf import kdf
 from vmess_aead.utils import SM4GCM
 from vmess_aead.utils.reader import (
