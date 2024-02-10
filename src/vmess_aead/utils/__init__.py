@@ -3,8 +3,7 @@ import uuid
 from functools import lru_cache
 from typing import Optional
 
-from cryptography.hazmat.backends.openssl.backend import Backend, GetCipherByName
-from cryptography.hazmat.primitives.ciphers import algorithms, modes
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 
 @lru_cache(maxsize=1)
@@ -68,18 +67,12 @@ class SM4GCM:
     def __init__(self, key: bytes) -> None:
         assert len(key) == 16
         self._algorithm = algorithms.SM4(key)
-        self._backend = Backend()
-        self._backend.register_cipher_adapter(
-            algorithms.SM4, modes.GCM, GetCipherByName("sm4-{mode.name}")
-        )
 
     def encrypt(
         self, nonce: bytes, data: bytes, associated_data: Optional[bytes]
     ) -> bytes:
         assert len(nonce) == 12
-        encryptor = self._backend.create_symmetric_encryption_ctx(
-            self._algorithm, modes.GCM(nonce)
-        )
+        encryptor = Cipher(self._algorithm, modes.GCM(nonce)).encryptor()
         if associated_data is not None:
             encryptor.authenticate_additional_data(associated_data)
         cipher_text = encryptor.update(data) + encryptor.finalize()
@@ -97,9 +90,7 @@ class SM4GCM:
         if tag is None:
             tag = tag or data[-16:]
             data = data[:-16]
-        decryptor = self._backend.create_symmetric_decryption_ctx(
-            self._algorithm, modes.GCM(nonce, tag)
-        )
+        decryptor = Cipher(self._algorithm, modes.GCM(nonce, tag)).decryptor()
         if associated_data is not None:
             decryptor.authenticate_additional_data(associated_data)
         return decryptor.update(data) + decryptor.finalize()
