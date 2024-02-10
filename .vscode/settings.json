@@ -5,10 +5,9 @@
     "python.testing.pytestEnabled": true,
     "[python]": {
         "editor.codeActionsOnSave": {
-            "source.organizeImports": "explicit",
             "source.fixAll.ruff": "explicit"
         },
-        "editor.defaultFormatter": "ms-python.black-formatter"
+        "editor.defaultFormatter": "charliermarsh.ruff"
     },
     "autoDocstring.customTemplatePath": ".vscode/docstring.mustache",
     "editor.formatOnSave": true,

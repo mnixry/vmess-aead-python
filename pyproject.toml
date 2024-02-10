@@ -22,3 +22,15 @@ dev = [
 
 [tool.pdm.scripts]
 test = { cmd = ["pytest", "--cov", "./src/", "--cov-report=term-missing", "."] }
+lint = "ruff --fix"
+
+[tool.ruff]
+select = [
+    # Pyflakes
+    "F",
+    # Pycodestyle
+    "E",
+    "W",
+    # isort
+    "I",
+]
