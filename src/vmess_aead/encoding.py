@@ -137,12 +137,11 @@ class VMessBodyEncoder:
             _, decryptor = self.cipher_pair
             reader = StreamCipherReader(reader, decryptor)
 
-        if not self.options & VMessBodyOptions.CHUNK_STREAM:
-            if (
-                isinstance(reader, StreamCipherReader)
-                or self.security is VMessBodySecurity.NONE
-            ):
-                return reader.read_all()
+        if not self.options & VMessBodyOptions.CHUNK_STREAM and (
+            isinstance(reader, StreamCipherReader)
+            or self.security is VMessBodySecurity.NONE
+        ):
+            return reader.read_all()
 
         if self.options & VMessBodyOptions.GLOBAL_PADDING and not (
             self.security is VMessBodySecurity.NONE

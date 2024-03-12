@@ -59,7 +59,8 @@ def test_pack():
         )
 
     packet += encoder.encode(
-        b"GET / HTTP/1.1\r\nHost: ip.sb\r\nUser-Agent: curl/8.5.0\r\nAccept: */*\r\n\r\n",
+        b"GET / HTTP/1.1\r\nHost: ip.sb\r\n"
+        b"User-Agent: curl/8.5.0\r\nAccept: */*\r\n\r\n",
         padding_generator=pseudo_padding,
     )
 

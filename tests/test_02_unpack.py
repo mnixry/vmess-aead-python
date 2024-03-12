@@ -57,7 +57,7 @@ def test_full_header():
         header.payload.command,
     )
     body = encoder.decode_once(reader)
-    assert (
-        body
-        == b"GET / HTTP/1.1\r\nHost: ip.sb\r\nUser-Agent: curl/8.5.0\r\nAccept: */*\r\n\r\n"
+    assert body == (
+        b"GET / HTTP/1.1\r\nHost: ip.sb\r\n"
+        b"User-Agent: curl/8.5.0\r\nAccept: */*\r\n\r\n"
     )

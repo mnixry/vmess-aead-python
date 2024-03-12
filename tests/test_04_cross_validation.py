@@ -35,7 +35,8 @@ RESOURCES_DIR = Path(__file__).parent / "resources"
 
 
 def bitmask_combination(
-    *enums: VMessBodyOptions, extra: VMessBodyOptions = VMessBodyOptions(0)
+    *enums: VMessBodyOptions,
+    extra: VMessBodyOptions = VMessBodyOptions(0),  # noqa: B008
 ):
     return {
         VMessBodyOptions(sum(x) | extra)
