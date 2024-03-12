@@ -34,8 +34,8 @@ class VMessAuthID:
         rand = reader.read(4)
         checksum_body = reader.read_before()
         checksum = reader.read_uint32()
-        if verify_checksum:
-            assert checksum == crc32(checksum_body)
+        if verify_checksum and checksum != crc32(checksum_body):
+            raise ValueError("Checksum mismatch")  # pragma: no cover
         return cls(timestamp, rand)
 
     def to_packet(self, user_id: UUID):
@@ -95,23 +95,22 @@ class VMessPlainPacketHeader:
         command = VMessBodyCommand(reader.read_byte())
         port = reader.read_uint16()
         address_type = VMessBodyAddressType(reader.read_byte())
-        if address_type is VMessBodyAddressType.IPV4:
-            address = IPv4Address(reader.read_uint32())
-        elif address_type is VMessBodyAddressType.DOMAIN:
-            domain_length = reader.read_byte()
-            address = reader.read(domain_length).decode()
-        elif address_type is VMessBodyAddressType.IPV6:
-            address = IPv6Address(reader.read_uint128())
-        else:
-            raise ValueError(
-                f"Unknown address type: {address_type!r}"
-            )  # pragma: no cover
+        match address_type:
+            case VMessBodyAddressType.IPV4:
+                address = IPv4Address(reader.read_uint32())
+            case VMessBodyAddressType.DOMAIN:
+                address = reader.read(reader.read_byte()).decode()
+            case VMessBodyAddressType.IPV6:
+                address = IPv6Address(reader.read_uint128())
+            case _:  # pragma: no cover
+                raise ValueError(f"Unknown {address_type=}")
         padding = b""
         if padding_length > 0:
             padding = reader.read(padding_length)
         checksum_body = reader.read_before()
         checksum = reader.read_uint32()
-        assert not verify_checksum or checksum == fnv1a32(checksum_body)
+        if verify_checksum and checksum != fnv1a32(checksum_body):
+            raise ValueError("Checksum mismatch")  # pragma: no cover
         return cls(
             version,
             body_iv,
@@ -140,18 +139,13 @@ class VMessPlainPacketHeader:
         packet += self.command.value.to_bytes(1, "big")
         packet += self.port.to_bytes(2, "big")
         packet += self.address_type.value.to_bytes(1, "big")
-        if isinstance(self.address, IPv4Address):
-            packet += self.address.packed
-        elif isinstance(self.address, str):
-            address_bytes = self.address.encode()
-            packet += len(address_bytes).to_bytes(1, "big")
-            packet += address_bytes
-        elif isinstance(self.address, IPv6Address):
-            packet += self.address.packed
-        else:
-            raise ValueError(
-                f"Unknown address type: {self.address!r}"
-            )  # pragma: no cover
+        match self.address:
+            case IPv4Address(packed=packed) | IPv6Address(packed=packed):
+                packet += packed
+            case _:
+                address_bytes = self.address.encode()
+                packet += len(address_bytes).to_bytes(1, "big")
+                packet += address_bytes
         if self.padding_length > 0:
             packet += self.padding
         checksum = fnv1a32(packet)
@@ -182,8 +176,11 @@ class VMessAEADRequestPacketHeader:
     ):
         encrypted_auth_id = reader.read(16)
         auth_id = VMessAuthID.from_packet(encrypted_auth_id, user_id, verify_checksum)
-        if timestamp is not None:
-            assert abs(timestamp - auth_id.timestamp) <= timestamp_range
+        if (
+            timestamp is not None
+            and abs(timestamp - auth_id.timestamp) > timestamp_range
+        ):
+            raise ValueError("Timestamp mismatch")  # pragma: no cover
         encrypted_header_length = reader.read(2 + 16)  # AEAD tag size is 16 bytes
         nonce = reader.read(8)
 
