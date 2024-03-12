@@ -68,12 +68,19 @@ class BytesReader(BaseReader):
     def offset(self) -> int:
         return self._offset
 
+    @property
+    def remaining(self) -> int:
+        return len(self._data) - self._offset
+
     def read(self, length: int) -> bytes:
         if self._offset + length > len(self._data):
             raise ReadOutOfBoundError()
         result = self._data[self._offset : self._offset + length]
         self._offset += length
         return result
+
+    def append(self, data: bytes) -> None:
+        self._data += data
 
     def read_all(self) -> bytes:
         return self.read(len(self._data) - self._offset)

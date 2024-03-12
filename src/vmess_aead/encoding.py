@@ -1,7 +1,7 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cached_property
 from secrets import token_bytes
-from typing import Callable, Optional
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
@@ -24,8 +24,8 @@ class VMessBodyEncoder:
     options: VMessBodyOptions
     security: VMessBodySecurity
     command: VMessBodyCommand
-    authenticated_length_key: Optional[bytes] = None
-    authenticated_length_iv: Optional[bytes] = None
+    authenticated_length_key: bytes | None = None
+    authenticated_length_iv: bytes | None = None
 
     _count: int = 0
 

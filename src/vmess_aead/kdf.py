@@ -2,7 +2,7 @@ import abc
 import hashlib
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, TypeVar
+from typing import Optional, TypeVar
 
 
 class KDFSaltConst(bytes, Enum):
@@ -81,7 +81,7 @@ class RecursiveHash(VMessHash):
         return self.outer.digest()
 
 
-def kdf(key: bytes, path: List[bytes]):
+def kdf(key: bytes, path: list[bytes]):
     current = RecursiveHash.create(KDFSaltConst.VMESS_AEAD_KDF, Sha256Hash())
     for item in path:
         current = RecursiveHash.create(item, current)
@@ -89,9 +89,9 @@ def kdf(key: bytes, path: List[bytes]):
     return current.digest()
 
 
-def kdf16(key: bytes, path: List[bytes]):
+def kdf16(key: bytes, path: list[bytes]):
     return kdf(key, path)[:16]
 
 
-def kdf12(key: bytes, path: List[bytes]):
+def kdf12(key: bytes, path: list[bytes]):
     return kdf(key, path)[:12]

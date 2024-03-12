@@ -2,7 +2,6 @@ import itertools
 import time
 from ipaddress import IPv4Address, IPv6Address
 from secrets import randbits, token_bytes
-from typing import Optional
 from uuid import uuid4
 
 import pytest
@@ -79,7 +78,7 @@ def test_feed(
     command: VMessBodyCommand,
     address_type: VMessBodyAddressType,
     address: IPv4Address,
-    resp_command: Optional[VMessResponseCommandSwitchAccount],
+    resp_command: VMessResponseCommandSwitchAccount | None,
 ):
     user_id = uuid4()
     header = VMessAEADRequestPacketHeader(

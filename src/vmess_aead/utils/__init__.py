@@ -1,7 +1,6 @@
 import hashlib
 import uuid
 from functools import lru_cache
-from typing import Optional
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -69,7 +68,7 @@ class SM4GCM:
         self._algorithm = algorithms.SM4(key)
 
     def encrypt(
-        self, nonce: bytes, data: bytes, associated_data: Optional[bytes]
+        self, nonce: bytes, data: bytes, associated_data: bytes | None
     ) -> bytes:
         assert len(nonce) == 12
         encryptor = Cipher(self._algorithm, modes.GCM(nonce)).encryptor()
@@ -83,8 +82,8 @@ class SM4GCM:
         self,
         nonce: bytes,
         data: bytes,
-        associated_data: Optional[bytes],
-        tag: Optional[bytes] = None,
+        associated_data: bytes | None,
+        tag: bytes | None = None,
     ) -> bytes:
         assert len(nonce) == 12
         if tag is None:

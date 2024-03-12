@@ -1,7 +1,6 @@
 from binascii import crc32
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address
-from typing import Optional, Union
 from uuid import UUID
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -76,7 +75,7 @@ class VMessPlainPacketHeader:
     """Port, uint16, big endian"""
     address_type: VMessBodyAddressType
     """Address type, uint8"""
-    address: Union[IPv4Address, IPv6Address, str]
+    address: IPv4Address | IPv6Address | str
     """Address, variable length"""
     padding: bytes
     """Padding bytes, variable length"""
@@ -178,7 +177,7 @@ class VMessAEADRequestPacketHeader:
         user_id: UUID,
         *,
         verify_checksum: bool = True,
-        timestamp: Optional[int] = None,
+        timestamp: int | None = None,
         timestamp_range: int = 2 * 60,
     ):
         encrypted_auth_id = reader.read(16)

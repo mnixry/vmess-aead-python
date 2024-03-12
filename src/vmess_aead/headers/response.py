@@ -1,6 +1,6 @@
 import abc
 from dataclasses import dataclass
-from typing import Generic, Literal, Optional, TypeVar
+from typing import Generic, Literal, TypeVar
 from uuid import UUID
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -110,7 +110,7 @@ class VMessAEADResponsePacketHeader(Generic[_CT]):
     """Response header, uint8, should be request.response_header"""
     options: VMessResponseBodyOptions
     """Options, uint8 (bitmask)"""
-    command: Optional[_CT]
+    command: _CT | None
     """Command, optional"""
 
     @classmethod
