@@ -30,12 +30,14 @@ def test_kdf():
 
 
 def test_bytes_reader():
-    reader = BytesReader(b"1234567890")
+    reader = BytesReader(b"12345")
+    reader.append(b"67890")
     assert reader.read(5) == b"12345"
     assert reader.offset == 5
     assert reader.read_before() == b"12345"
     assert reader.read_all() == b"67890"
     assert reader.offset == 10
+    assert reader.remaining == 0
 
     with pytest.raises(ReadOutOfBoundError):
         reader.read(5)
