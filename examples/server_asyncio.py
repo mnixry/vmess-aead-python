@@ -3,7 +3,9 @@ import hashlib
 import logging
 import time
 import uuid
-from typing import Any
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Any, Literal
 
 from rich.logging import RichHandler
 from vmess_aead.encoding import VMessBodyEncoder
@@ -21,7 +23,54 @@ logger = logging.getLogger(__name__)
 
 
 _NetworkTransport = asyncio.DatagramTransport | asyncio.WriteTransport
-_MAX_PACKET_SIZE = 0x8000  # 32KB
+_MAX_PACKET_SIZE = 0xFFFF - 0xFF  # 64KB minus additional overhead
+
+
+@dataclass(frozen=True)
+class TransferSpeed:
+    elapsed: float
+    transferred: int
+
+    unit_format: Literal["bits", "bytes"] = "bytes"
+    """display unit format, either bits or bytes per second"""
+    si: bool = False
+    """use SI unit (1 KB = 1000 bytes) or IEC unit (1 KiB = 1024 bytes)"""
+
+    @staticmethod
+    def _digit_scale(value: float | int, base: int) -> str:
+        scales = ["", "K", "M", "G", "T", "P", "E", "Z", "Y"]
+        scale = 0
+        while value >= base:
+            value /= base
+            scale += 1
+        return f"{value:.2f} {scales[scale]}"
+
+    @property
+    def human_readable_size(self) -> str:
+        text = self._digit_scale(self.transferred, 1024 if not self.si else 1000)
+        text += "B" if not self.si else "iB"
+        return text
+
+    @property
+    def human_readable_rate(self) -> str:
+        rate = self.transferred / self.elapsed
+        text = self._digit_scale(
+            rate * 8 if self.unit_format == "bits" else rate,
+            1024 if not self.si else 1000,
+        )
+        text += (
+            "bps" if self.unit_format == "bits" else "B/s" if not self.si else "iB/s"
+        )
+        return text
+
+    def __repr__(self) -> str:
+        return f"<{type(self).__name__} {self.__str__()}>"
+
+    def __str__(self) -> str:
+        text = f"in {timedelta(seconds=self.elapsed)}"
+        text += f", {self.human_readable_size} transferred"
+        text += f", at {self.human_readable_rate} rate"
+        return text
 
 
 class VMessServerProtocol(asyncio.Protocol):
@@ -155,14 +204,10 @@ class VMessServerProtocol(asyncio.Protocol):
 
     def eof_received(self):
         time_taken = time.time() - self.start_time
-        transfer_rate = self.data_transferred / time_taken
         logger.info(
-            "EOF received from local connection %s:%s, "
-            "%d bytes transferred, %.2f bytes/s in %.2fs",
+            "EOF received from local connection %s:%s, %s",
             *self.transport.get_extra_info("peername"),
-            self.data_transferred,
-            transfer_rate,
-            time_taken,
+            TransferSpeed(time_taken, self.data_transferred),
         )
         if isinstance(self.remote_transport, asyncio.WriteTransport):
             self.remote_transport.write_eof()
@@ -208,15 +253,10 @@ class VMessServerRemoteConnectionProtocol(asyncio.Protocol):
 
     def eof_received(self):
         time_taken = time.time() - self.start_time
-        receive_rate = self.data_transferred / time_taken
-
         logger.info(
-            "EOF received from remote connection %s:%s, "
-            "%d bytes received, %.2f bytes/s in %.2fs",
+            "EOF received from remote connection %s:%s, %s",
             *self.transport.get_extra_info("peername"),
-            self.data_transferred,
-            receive_rate,
-            time_taken,
+            TransferSpeed(time_taken, self.data_transferred),
         )
         self.local_transport.write_eof()
 
