@@ -75,7 +75,8 @@ def test_stream_cipher_reader():
     )
     assert reader.read(5) == b"12345"
     assert reader.offset == 5
-    assert reader.read_all() == b"67890"
+    assert reader.read_until(b"8") == b"678"
+    assert reader.read_all() == b"90"
     assert reader.offset == 10
 
     with pytest.raises(ReadOutOfBoundError):

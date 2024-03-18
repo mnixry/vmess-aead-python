@@ -21,6 +21,12 @@ class BaseReader(abc.ABC):
     def read_byte(self) -> int:
         return self.read(1)[0]
 
+    def read_until(self, delimiter: bytes) -> bytes:
+        data = b""
+        while not data.endswith(delimiter):
+            data += self.read(1)
+        return data
+
     def read_uint16(self) -> int:
         return int.from_bytes(self.read(2), "big")
 
