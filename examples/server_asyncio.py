@@ -84,7 +84,8 @@ class VMessServerProtocol(asyncio.Protocol):
         self.data_transferred = 0
         self.start_time = time.time()
 
-    def connection_made(self, transport: asyncio.WriteTransport) -> None:
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        assert isinstance(transport, asyncio.Transport)
         logger.info(
             "Connection made from %s:%s",
             *transport.get_extra_info("peername"),
@@ -239,7 +240,8 @@ class VMessServerRemoteConnectionProtocol(asyncio.Protocol):
         self.data_transferred = 0
         self.start_time = time.time()
 
-    def connection_made(self, transport: asyncio.WriteTransport) -> None:
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        assert isinstance(transport, asyncio.Transport)
         self.transport = transport
 
     def data_received(self, data: bytes) -> None:

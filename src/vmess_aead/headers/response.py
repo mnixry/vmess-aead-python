@@ -10,10 +10,12 @@ from vmess_aead.kdf import KDFSaltConst, kdf12, kdf16
 from vmess_aead.utils import fnv1a32
 from vmess_aead.utils.reader import BaseReader, BytesReader
 
+_IDT = TypeVar("_IDT", bound=int)
+
 
 @dataclass
-class VMessResponseCommand(abc.ABC):
-    command_id: int
+class VMessResponseCommand(abc.ABC, Generic[_IDT]):
+    command_id: _IDT
 
     @staticmethod
     def unwrap(reader: BaseReader, verify_checksum: bool = True):
@@ -47,9 +49,7 @@ class VMessResponseCommand(abc.ABC):
 
 
 @dataclass
-class VMessResponseCommandSwitchAccount(VMessResponseCommand):
-    command_id: Literal[0x01]
-
+class VMessResponseCommandSwitchAccount(VMessResponseCommand[Literal[0x01]]):
     host: str
     """Host, variable length, zero length means no change"""
     port: int
