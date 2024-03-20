@@ -67,12 +67,16 @@ class BufferedReader(BaseReader):
 
 class BytesReader(BaseReader):
     def __init__(self, data: bytes):
-        self._data = data
+        self._data = bytearray(data)
         self._offset = 0
 
     @property
     def offset(self) -> int:
         return self._offset
+
+    @offset.setter
+    def offset(self, value: int) -> None:
+        self._offset = value
 
     @property
     def remaining(self) -> int:
@@ -83,7 +87,7 @@ class BytesReader(BaseReader):
             raise ReadOutOfBoundError()
         result = self._data[self._offset : self._offset + length]
         self._offset += length
-        return result
+        return bytes(result)
 
     def append(self, data: bytes) -> None:
         self._data += data
