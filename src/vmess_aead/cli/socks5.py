@@ -337,11 +337,6 @@ class Socks5Protocol(asyncio.Protocol):
         self.remote_protocol = protocol
         await protocol.wait_connection()
 
-        logger.info(
-            "Connected to remote server %s:%s",
-            *transport.get_extra_info("peername"),
-        )
-
         async for data in protocol.recv_data():
             if self.transport.is_closing():
                 break
@@ -421,12 +416,19 @@ class Socks5Protocol(asyncio.Protocol):
         self.transport.write(reply.to_packet())
 
     def eof_received(self):
+        self.remote_protocol.send_data(b"")
         self.remote_protocol.transport.write_eof()
+        logger.info("EOF received from socks5 client %s:%s", *self.peer_address)
         return
 
     def connection_lost(self, exc: Exception | None) -> None:
         self.remote_protocol.transport.close()
-        return super().connection_lost(exc)
+        if exc:
+            logger.exception(
+                "Connection to socks5 client %s:%s lost due to unexpected error",
+                *self.peer_address,
+            )
+        return
 
 
 class Socks5UDPRelay(asyncio.DatagramProtocol):
@@ -488,7 +490,7 @@ if __name__ == "__main__":
     import sys
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         stream=sys.stderr,
     )

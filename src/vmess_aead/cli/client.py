@@ -8,7 +8,8 @@ from ipaddress import IPv4Address, IPv6Address
 from secrets import randbelow, token_bytes
 from typing import Self
 
-from vmess_aead.encoding import VMessBodyEncoder
+from vmess_aead.cli.utils import TransferSpeed
+from vmess_aead.encoding import VMessBodyDecoder, VMessBodyEncoder
 from vmess_aead.enums import (
     VMessBodyAddressType,
     VMessBodyCommand,
@@ -22,9 +23,10 @@ from vmess_aead.headers.request import (
 )
 from vmess_aead.headers.response import VMessAEADResponsePacketHeader
 from vmess_aead.utils import generate_response_key
-from vmess_aead.utils.reader import BytesReader, ReadOutOfBoundError
+from vmess_aead.utils.reader import BytesReader
 
 logger = logging.getLogger(__name__)
+
 
 _MAX_PACKET_SIZE = 0x8000  # 32KB
 
@@ -67,6 +69,7 @@ class VMessClientProtocol(asyncio.Protocol):
         self.reader = BytesReader(b"")
         self.bytes_received = 0
         self.bytes_sent = 0
+        self.establish_time = time.time()
         self.send_queue = deque[bytes]()
 
         loop = asyncio.get_running_loop()
@@ -99,7 +102,7 @@ class VMessClientProtocol(asyncio.Protocol):
 
         self.header = VMessAEADRequestPacketHeader(
             auth_id=VMessAuthID(
-                timestamp=int(time.time()),
+                timestamp=int(self.establish_time),
                 rand=token_bytes(4),
             ),
             nonce=token_bytes(8),
@@ -130,7 +133,7 @@ class VMessClientProtocol(asyncio.Protocol):
 
         resp_key = generate_response_key(self.header.payload.body_key)
         resp_iv = generate_response_key(self.header.payload.body_iv)
-        self.resp_encoder = VMessBodyEncoder(
+        self.resp_decoder = VMessBodyDecoder(
             resp_key,
             resp_iv,
             self.header.payload.options,
@@ -166,8 +169,8 @@ class VMessClientProtocol(asyncio.Protocol):
 
         self.resp_header = VMessAEADResponsePacketHeader.from_packet(
             self.reader,
-            body_iv=self.resp_encoder.body_iv,
-            body_key=self.resp_encoder.body_key,
+            body_iv=self.resp_decoder.body_iv,
+            body_key=self.resp_decoder.body_key,
         )
         if self.resp_header.command is not None:
             logger.error(
@@ -188,6 +191,15 @@ class VMessClientProtocol(asyncio.Protocol):
 
     def connection_lost(self, exc: Exception | None):
         self.data_received_event.set()
+        tx_speed = TransferSpeed(time.time() - self.establish_time, self.bytes_sent)
+        rx_speed = TransferSpeed(time.time() - self.establish_time, self.bytes_received)
+        logger.info(
+            "Connection to %s:%s closed: tx: %s; rx: %s",
+            self.host,
+            self.port,
+            tx_speed,
+            rx_speed,
+        )
         if exc is None:
             return
         if isinstance(exc, ConnectionError):
@@ -226,26 +238,17 @@ class VMessClientProtocol(asyncio.Protocol):
         while not self.transport.is_closing():
             await self.data_received_event.wait()
 
-            data = b""
             should_continue = True
 
-            while self.reader.remaining and should_continue:
-                before_offset = self.reader.offset
-                before_masker_cursor = self.resp_encoder.masker.buffer_cursor
-                received = b""
-                try:
-                    data += (received := self.resp_encoder.decode_once(self.reader))
-                except ReadOutOfBoundError:
-                    self.reader.offset = before_offset
-                    self.resp_encoder.masker.buffer_cursor = before_masker_cursor
-                    logger.debug("Not enough data to decode, waiting for more data")
-                    break
-                # once the decoded data is empty, indicates EOF
-                if not received:
+            chunks = self.resp_decoder.decode(self.reader.read_all())
+            data = b""
+            for chunk in chunks:
+                if not chunk:
                     should_continue = False
-
-            yield data
-
+                    break
+                data += chunk
+            if data:
+                yield data
             if not should_continue:
                 logger.debug("EOF received from remote server")
                 break
