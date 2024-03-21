@@ -43,6 +43,10 @@ class Shake128Reader(BaseReader):
     def buffer_size(self) -> int:
         return len(self.buffer)
 
+    @property
+    def remaining(self) -> int:
+        return self.buffer_size - self.offset
+
     def read(self, length: int) -> bytes:
         if self.offset + length > self.buffer_size:
             self.buffer = self.hasher.digest(self.buffer_size + self.increase_length)

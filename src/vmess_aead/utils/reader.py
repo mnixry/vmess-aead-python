@@ -1,5 +1,4 @@
 import abc
-import socket
 from typing import IO
 
 from cryptography.hazmat.primitives.ciphers import CipherContext
@@ -10,12 +9,22 @@ class ReadOutOfBoundError(ValueError):
 
 
 class BaseReader(abc.ABC):
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def offset(self) -> int:
+        raise NotImplementedError  # pragma: no cover
+
+    @property
+    @abc.abstractmethod
+    def remaining(self) -> int:
         raise NotImplementedError  # pragma: no cover
 
     @abc.abstractmethod
     def read(self, length: int) -> bytes:
+        raise NotImplementedError  # pragma: no cover
+
+    @abc.abstractmethod
+    def read_all(self) -> bytes:
         raise NotImplementedError  # pragma: no cover
 
     def read_byte(self) -> int:
@@ -39,10 +48,6 @@ class BaseReader(abc.ABC):
     def read_uint128(self) -> int:
         return int.from_bytes(self.read(16), "big")
 
-    @abc.abstractmethod
-    def read_all(self) -> bytes:
-        raise NotImplementedError  # pragma: no cover
-
 
 class BufferedReader(BaseReader):
     def __init__(self, reader: BaseReader):
@@ -52,6 +57,10 @@ class BufferedReader(BaseReader):
     @property
     def offset(self) -> int:
         return self._reader.offset
+
+    @property
+    def remaining(self) -> int:
+        return self._reader.remaining
 
     def read(self, length: int) -> bytes:
         received = self._reader.read(length)
@@ -74,18 +83,14 @@ class BytesReader(BaseReader):
     def offset(self) -> int:
         return self._offset
 
-    @offset.setter
-    def offset(self, value: int) -> None:
-        self._offset = value
-
     @property
     def remaining(self) -> int:
-        return len(self._data) - self._offset
+        return len(self._data)
 
     def read(self, length: int) -> bytes:
-        if self._offset + length > len(self._data):
-            raise ReadOutOfBoundError()
-        result = self._data[self._offset : self._offset + length]
+        if length > self.remaining:
+            raise ReadOutOfBoundError
+        result, self._data = self._data[:length], self._data[length:]
         self._offset += length
         return bytes(result)
 
@@ -93,10 +98,7 @@ class BytesReader(BaseReader):
         self._data += data
 
     def read_all(self) -> bytes:
-        return self.read(len(self._data) - self._offset)
-
-    def read_before(self) -> bytes:
-        return self._data[: self._offset]
+        return self.read(self.remaining)
 
 
 class IOReader(BaseReader):
@@ -107,6 +109,12 @@ class IOReader(BaseReader):
     @property
     def offset(self) -> int:
         return self._offset
+
+    @property
+    def remaining(self) -> int:
+        if not self._io.seekable():
+            raise NotImplementedError("Read remaining bytes from non-seekable IO")
+        return self._io.seek(0, 2) - self._offset
 
     def read(self, length: int) -> bytes:
         result = self._io.read(length)
@@ -131,6 +139,10 @@ class StreamCipherReader(BaseReader):
     def offset(self) -> int:
         return self._offset
 
+    @property
+    def remaining(self) -> int:
+        return self._reader.remaining
+
     def read(self, length: int) -> bytes:
         data = self._reader.read(length)
         self._offset += length
@@ -140,35 +152,3 @@ class StreamCipherReader(BaseReader):
         data = self._reader.read_all()
         self._offset += len(data)
         return self._cipher.update(data)
-
-
-class SocketReader(BaseReader):
-    def __init__(self, socket: socket.socket, buffer_size: int = 1024):
-        self._socket = socket
-        self._offset = 0
-        self._buffer = b""
-        self._buffer_size = buffer_size
-
-    @property
-    def offset(self) -> int:
-        return self._offset
-
-    def read(self, length: int) -> bytes:
-        while len(self._buffer) < length:
-            received = self._socket.recv(self._buffer_size)
-            if not received:
-                raise ReadOutOfBoundError()
-            self._buffer += received
-        result = self._buffer[:length]
-        self._buffer = self._buffer[length:]
-        self._offset += length
-        return result
-
-    def read_all(self) -> bytes:
-        while True:
-            self._buffer += (received := self._socket.recv(self._buffer_size))
-            if len(received) < self._buffer_size:
-                break
-        self._offset += len(self._buffer)
-        data, self._buffer = self._buffer, b""
-        return data
