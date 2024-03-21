@@ -3,7 +3,8 @@ from io import BytesIO
 from ipaddress import IPv4Address
 from pathlib import Path
 
-from vmess_aead import VMessAEADRequestPacketHeader, VMessBodyEncoder
+from vmess_aead import VMessAEADRequestPacketHeader
+from vmess_aead.encoding import VMessBodyDecoder
 from vmess_aead.enums import (
     VMessBodyAddressType,
     VMessBodyCommand,
@@ -49,15 +50,15 @@ def test_full_header():
         ),
     )
     assert header == header_compare
-    encoder = VMessBodyEncoder(
+    decoder = VMessBodyDecoder(
         header.payload.body_key,
         header.payload.body_iv,
         header.payload.options,
         header.payload.security,
         header.payload.command,
     )
-    body = encoder.decode_once(reader)
-    assert body == (
+    body = decoder.decode(reader.read_all())
+    assert body == [
         b"GET / HTTP/1.1\r\nHost: ip.sb\r\n"
         b"User-Agent: curl/8.5.0\r\nAccept: */*\r\n\r\n"
-    )
+    ]

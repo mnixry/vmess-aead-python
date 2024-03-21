@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory, mktemp
 from urllib.request import urlretrieve
 
 import pytest
-from vmess_aead.encoding import VMessBodyEncoder
+from vmess_aead.encoding import VMessBodyDecoder, VMessBodyEncoder
 from vmess_aead.enums import (
     VMessBodyAddressType,
     VMessBodyCommand,
@@ -84,7 +84,7 @@ def v2ray_server(v2ray_core: Path):
         VMessBodyOptions.CHUNK_MASKING,
         VMessBodyOptions.GLOBAL_PADDING,
         VMessBodyOptions.AUTHENTICATED_LENGTH,
-        extra=VMessBodyOptions.CHUNK_STREAM,  # TODO: make it being a part of test
+        VMessBodyOptions.CHUNK_STREAM,
     ),
     ids=lambda x: x.name,
 )
@@ -185,7 +185,7 @@ def test_as_client(
             recv_data += server_connection.recv(1024)
         assert recv_data == data, f"Round {r} failed"
 
-    recv_encoder = VMessBodyEncoder(
+    recv_encoder = VMessBodyDecoder(
         body_key=resp_key,
         body_iv=resp_iv,
         options=header_packet.payload.options,
@@ -195,15 +195,19 @@ def test_as_client(
         authenticated_length_key=header_packet.payload.body_key,
     )
 
-    assert recv_encoder.decode_once(reader) == b"ok"
-
-    for r in range(10):
+    data_sent = b"ok"
+    for _ in range(10):
         data = token_bytes(randbits(12))
         server_connection.sendall(data)
-        recv_data = b""
-        while len(recv_data) < len(data):
-            recv_data += recv_encoder.decode_once(reader)
-        assert recv_data == data, f"Round {r} failed"
+        data_sent += data
+
+    data_recv = b""
+    while True:
+        chunks = recv_encoder.decode(reader.read(1))
+        data_recv += b"".join(chunks)
+        if len(data_recv) >= len(data_sent):
+            break
+    assert data_recv == data_sent
 
 
 @pytest.mark.skip("TODO")

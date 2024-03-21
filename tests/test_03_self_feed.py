@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 from vmess_aead import VMessAEADRequestPacketHeader, VMessAEADResponsePacketHeader
-from vmess_aead.encoding import VMessBodyEncoder
+from vmess_aead.encoding import VMessBodyDecoder, VMessBodyEncoder
 from vmess_aead.enums import (
     VMessBodyAddressType,
     VMessBodyCommand,
@@ -135,7 +135,7 @@ def test_feed(
         authenticated_length_key=header.payload.body_key,
     )
 
-    decoder = VMessBodyEncoder(
+    decoder = VMessBodyDecoder(
         body_key=resp_body_key,
         body_iv=resp_body_iv,
         security=security,
@@ -145,8 +145,7 @@ def test_feed(
         authenticated_length_key=header.payload.body_key,
     )
 
-    for _ in range(10):
-        body = token_bytes(randbits(12))
-        encoded_body = encoder.encode(body)
-        decoded_body = decoder.decode_once(BytesReader(encoded_body))
-        assert body == decoded_body
+    plain_text_chunks = [token_bytes(randbits(12)) for _ in range(10)]
+    encoded_chunks = [encoder.encode(chunk) for chunk in plain_text_chunks]
+    decoded_chunks = decoder.decode(b"".join(encoded_chunks))
+    assert b"".join(decoded_chunks) == b"".join(plain_text_chunks)
