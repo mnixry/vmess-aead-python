@@ -12,8 +12,8 @@ license = { text = "MIT" }
 
 [project.optional-dependencies]
 cli = [
-    "rich>=13.7.0", # Rich is used to support colored logging
-    "typer>=0.9.0", # Typer is used to support command line interface
+    "rich>=13.7.0",      # Rich is used to support colored logging
+    "typer[all]>=0.9.0", # Typer is used to support command line interface
 ]
 
 [build-system]
