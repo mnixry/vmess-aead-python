@@ -181,7 +181,7 @@ class VMessBodyDecoder(_VMessBodyEncodingBase):
         self.reader.append(data)
 
         chunks: list[bytes] = []
-        for chunk in self._decoder:
+        for chunk in self._decoder:  # pragma: no branch
             if chunk is None:
                 break
             chunks.append(chunk)
@@ -230,6 +230,8 @@ class VMessBodyDecoder(_VMessBodyEncodingBase):
                         yield
                         continue
                     self.state = VMessBodyDecoderState.HEADER
+                case _:  # pragma: no cover
+                    raise ValueError(f"Unknown {self.state=}")
         return
 
     @staticmethod
