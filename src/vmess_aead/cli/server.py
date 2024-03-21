@@ -3,21 +3,15 @@ import hashlib
 import logging
 import time
 import uuid
-from dataclasses import dataclass
-from datetime import timedelta
-from typing import Any, Literal
+from functools import cached_property
+from typing import Any
 
-from rich.logging import RichHandler
-from vmess_aead.encoding import VMessBodyEncoder
+from vmess_aead.cli.utils import TransferSpeed
+from vmess_aead.encoding import VMessBodyDecoder, VMessBodyEncoder
 from vmess_aead.enums import VMessBodyCommand, VMessResponseBodyOptions
 from vmess_aead.headers.request import VMessAEADRequestPacketHeader
 from vmess_aead.headers.response import VMessAEADResponsePacketHeader
 from vmess_aead.utils.reader import BytesReader
-
-logging.basicConfig(
-    level=logging.INFO,
-    handlers=[RichHandler(rich_tracebacks=True)],
-)
 
 logger = logging.getLogger(__name__)
 
@@ -26,71 +20,26 @@ _NetworkTransport = asyncio.DatagramTransport | asyncio.WriteTransport
 _MAX_PACKET_SIZE = 0xFFFF - 0xFF  # 64KB minus additional overhead
 
 
-@dataclass(frozen=True)
-class TransferSpeed:
-    elapsed: float
-    transferred: int
-
-    unit_format: Literal["bits", "bytes"] = "bytes"
-    """display unit format, either bits or bytes per second"""
-    si: bool = False
-    """use SI unit (1 KB = 1000 bytes) or IEC unit (1 KiB = 1024 bytes)"""
-
-    @staticmethod
-    def _digit_scale(value: float | int, base: int) -> str:
-        scales = ["", "K", "M", "G", "T", "P", "E", "Z", "Y"]
-        scale = 0
-        while value >= base:
-            value /= base
-            scale += 1
-        return f"{value:.2f} {scales[scale]}"
-
-    @property
-    def human_readable_size(self) -> str:
-        text = self._digit_scale(self.transferred, 1024 if not self.si else 1000)
-        text += "B" if not self.si else "iB"
-        return text
-
-    @property
-    def human_readable_rate(self) -> str:
-        rate = self.transferred / self.elapsed
-        text = self._digit_scale(
-            rate * 8 if self.unit_format == "bits" else rate,
-            1024 if not self.si else 1000,
-        )
-        text += (
-            "bps" if self.unit_format == "bits" else "B/s" if not self.si else "iB/s"
-        )
-        return text
-
-    def __repr__(self) -> str:
-        return f"<{type(self).__name__} {self.__str__()}>"
-
-    def __str__(self) -> str:
-        text = f"in {timedelta(seconds=self.elapsed)}"
-        text += f", {self.human_readable_size} transferred"
-        text += f", at {self.human_readable_rate} rate"
-        return text
-
-
 class VMessServerProtocol(asyncio.Protocol):
     header: VMessAEADRequestPacketHeader | None = None
     remote_transport: _NetworkTransport | None = None
 
-    def __init__(self, user_id: uuid.UUID) -> None:
-        self.reader = BytesReader(b"")
+    def __init__(self, user_id: uuid.UUID, *, enable_udp: bool = True) -> None:
         self.user_id = user_id
+        self.enable_udp = enable_udp
 
+        self.reader = BytesReader(b"")
         self.data_transferred = 0
         self.start_time = time.time()
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         assert isinstance(transport, asyncio.Transport)
-        logger.info(
-            "Connection made from %s:%s",
-            *transport.get_extra_info("peername"),
-        )
         self.transport = transport
+        logger.info("Connection made from %s:%s", *self.peer_address)
+
+    @cached_property
+    def peer_address(self) -> tuple[str, int]:
+        return self.transport.get_extra_info("peername")
 
     def data_received(self, data: bytes) -> None:
         self.data_transferred += (data_length := len(data))
@@ -102,7 +51,7 @@ class VMessServerProtocol(asyncio.Protocol):
             self._initial_connection()
 
         if self.remote_transport:
-            self._feed_body()
+            self._feed_body(data)
 
     def _initial_connection(self) -> None:
         try:
@@ -126,7 +75,7 @@ class VMessServerProtocol(asyncio.Protocol):
             command=None,
         )
 
-        self.encoder = VMessBodyEncoder(
+        self.decoder = VMessBodyDecoder(
             self.header.payload.body_key,
             self.header.payload.body_iv,
             self.header.payload.options,
@@ -157,6 +106,13 @@ class VMessServerProtocol(asyncio.Protocol):
                 )
             )
         elif self.header.payload.command is VMessBodyCommand.UDP:
+            if not self.enable_udp:
+                logger.debug(
+                    "dropping UDP request from %s:%s due to configuration",
+                    *self.peer_address,
+                )
+                self.transport.close()
+                return
             remote_task = loop.create_task(
                 loop.create_datagram_endpoint(
                     lambda: VMessServerRemoteDatagramProtocol(
@@ -191,23 +147,25 @@ class VMessServerProtocol(asyncio.Protocol):
         else:
             self.remote_send = self.remote_transport.write
 
-        self._feed_body()
+        if self.reader.remaining:
+            self._feed_body(self.reader.read_all())
 
-    def _feed_body(self):
-        while self.reader.remaining:
-            data = self.encoder.decode_once(self.reader)
-            if not data:
+    def _feed_body(self, data: bytes):
+        chunks = self.decoder.decode(data)
+        for chunk in chunks:
+            if not chunk:
                 self.transport.write_eof()
                 if isinstance(self.remote_transport, asyncio.WriteTransport):
                     self.remote_transport.write_eof()
                 break
-            self.remote_send(data)
+            self.remote_send(chunk)
+        return
 
     def eof_received(self):
         time_taken = time.time() - self.start_time
         logger.info(
             "EOF received from local connection %s:%s, %s",
-            *self.transport.get_extra_info("peername"),
+            *self.peer_address,
             TransferSpeed(time_taken, self.data_transferred),
         )
         if isinstance(self.remote_transport, asyncio.WriteTransport):
@@ -220,7 +178,7 @@ class VMessServerProtocol(asyncio.Protocol):
             return
         logger.exception(
             "Connection abnormal closed from local connection %s:%s",
-            *self.transport.get_extra_info("peername"),
+            *self.peer_address,
             exc_info=exc,
         )
 
@@ -244,6 +202,10 @@ class VMessServerRemoteConnectionProtocol(asyncio.Protocol):
         assert isinstance(transport, asyncio.Transport)
         self.transport = transport
 
+    @cached_property
+    def peer_address(self) -> tuple[str, int]:
+        return self.transport.get_extra_info("peername")
+
     def data_received(self, data: bytes) -> None:
         self.data_transferred += (data_length := len(data))
         logger.debug("%d bytes received from remote connection", data_length)
@@ -257,7 +219,7 @@ class VMessServerRemoteConnectionProtocol(asyncio.Protocol):
         time_taken = time.time() - self.start_time
         logger.info(
             "EOF received from remote connection %s:%s, %s",
-            *self.transport.get_extra_info("peername"),
+            *self.peer_address,
             TransferSpeed(time_taken, self.data_transferred),
         )
         self.local_transport.write_eof()
@@ -267,7 +229,7 @@ class VMessServerRemoteConnectionProtocol(asyncio.Protocol):
             return
         logger.exception(
             "Connection abnormal closed from remote connection %s:%s",
-            *self.transport.get_extra_info("peername"),
+            *self.peer_address,
             exc_info=exc,
         )
         self.local_transport.close()
