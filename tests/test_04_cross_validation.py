@@ -25,7 +25,7 @@ from vmess_aead.headers.request import (
 )
 from vmess_aead.headers.response import VMessAEADResponsePacketHeader
 from vmess_aead.utils import generate_response_key
-from vmess_aead.utils.reader import SocketReader
+from vmess_aead.utils.reader import IOReader
 
 if platform.system() != "Linux" or platform.machine() != "x86_64":
     pytest.skip("Cross validation only works on Linux x86_64", allow_module_level=True)
@@ -155,7 +155,12 @@ def test_as_client(
     server_connection.settimeout(5)
     server_connection.send(b"ok")
 
-    reader = SocketReader(client)
+    reader = IOReader(client.makefile("rb"))
+
+    # socket file is not seekable
+    with pytest.raises(NotImplementedError):
+        assert reader.remaining
+
     resp_iv = generate_response_key(header_packet.payload.body_iv)
     resp_key = generate_response_key(header_packet.payload.body_key)
     resp_header = VMessAEADResponsePacketHeader.from_packet(
