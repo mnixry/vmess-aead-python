@@ -10,7 +10,7 @@ from vmess_aead.enums import VMessBodyCommand, VMessBodyOptions, VMessBodySecuri
 from vmess_aead.kdf import kdf16
 from vmess_aead.utils import (
     SM4GCM,
-    Shake128Stream,
+    Shake128Reader,
     fnv1a32,
     generate_chacha20_poly1305_key,
 )
@@ -39,7 +39,7 @@ class VMessBodyEncoder:
 
     @cached_property
     def masker(self):
-        return Shake128Stream(self.body_iv)
+        return Shake128Reader(self.body_iv)
 
     @cached_property
     def aead(self):
@@ -108,7 +108,7 @@ class VMessBodyEncoder:
             self.security is VMessBodySecurity.NONE
             and self.command in (VMessBodyCommand.TCP, VMessBodyCommand.MUX)
         ):
-            padding_length = self.masker.next_uint16() % 64
+            padding_length = self.masker.read_uint16() % 64
         else:
             padding_length = 0
         padding = padding_generator(padding_length)
@@ -123,7 +123,7 @@ class VMessBodyEncoder:
                 self.length_aead_nonce, (length - 16).to_bytes(2, "big"), None
             )
         elif self.options & VMessBodyOptions.CHUNK_MASKING:
-            encrypted_length = (self.masker.next_uint16() ^ length).to_bytes(2, "big")
+            encrypted_length = (self.masker.read_uint16() ^ length).to_bytes(2, "big")
         else:
             encrypted_length = length.to_bytes(2, "big")
 
@@ -150,7 +150,7 @@ class VMessBodyEncoder:
             self.security is VMessBodySecurity.NONE
             and self.command in (VMessBodyCommand.TCP, VMessBodyCommand.MUX)
         ):
-            padding_length = self.masker.next_uint16() % 64
+            padding_length = self.masker.read_uint16() % 64
         else:
             padding_length = 0
 
@@ -164,7 +164,7 @@ class VMessBodyEncoder:
             )
             length = int.from_bytes(decrypted_length, "big") + 16
         elif self.options & VMessBodyOptions.CHUNK_MASKING:
-            length = reader.read_uint16() ^ self.masker.next_uint16()
+            length = reader.read_uint16() ^ self.masker.read_uint16()
         else:
             length = reader.read_uint16()
 
