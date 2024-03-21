@@ -5,7 +5,9 @@ from cryptography.hazmat.primitives.ciphers import CipherContext
 
 
 class ReadOutOfBoundError(ValueError):
-    pass
+    def __init__(self, requested: int, remaining: int, *args: object) -> None:
+        self.requested = requested
+        self.remaining = remaining
 
 
 class BaseReader(abc.ABC):
@@ -89,7 +91,7 @@ class BytesReader(BaseReader):
 
     def read(self, length: int) -> bytes:
         if length > self.remaining:
-            raise ReadOutOfBoundError
+            raise ReadOutOfBoundError(length, self.remaining)
         result, self._data = self._data[:length], self._data[length:]
         self._offset += length
         return bytes(result)
@@ -98,7 +100,9 @@ class BytesReader(BaseReader):
         self._data += data
 
     def read_all(self) -> bytes:
-        return self.read(self.remaining)
+        result, self._data = self._data, b""
+        self._offset += len(result)
+        return bytes(result)
 
 
 class IOReader(BaseReader):
@@ -119,7 +123,7 @@ class IOReader(BaseReader):
     def read(self, length: int) -> bytes:
         result = self._io.read(length)
         if len(result) != length:
-            raise ReadOutOfBoundError()
+            raise ReadOutOfBoundError(length, len(result))
         self._offset += length
         return result
 
