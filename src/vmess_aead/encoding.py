@@ -1,7 +1,10 @@
+import enum
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cached_property, wraps
+from logging import getLogger
 from secrets import token_bytes
+from typing import ParamSpec, TypeVar
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
@@ -14,11 +17,22 @@ from vmess_aead.utils import (
     fnv1a32,
     generate_chacha20_poly1305_key,
 )
-from vmess_aead.utils.reader import BaseReader, StreamCipherReader
+from vmess_aead.utils.reader import (
+    BaseReader,
+    BytesReader,
+    ReadOutOfBoundError,
+    StreamCipherReader,
+)
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+logger = getLogger(__name__)
 
 
 @dataclass
-class VMessBodyEncoder:
+class _VMessBodyEncodingBase:
     body_key: bytes
     body_iv: bytes
     options: VMessBodyOptions
@@ -26,16 +40,18 @@ class VMessBodyEncoder:
     command: VMessBodyCommand
     authenticated_length_key: bytes | None = None
     authenticated_length_iv: bytes | None = None
+    verify_checksum: bool = True
 
-    _count: int = 0
+    def __post_init__(self):
+        self._count = 0
 
     @property
     def count(self) -> int:
-        return self._count
+        return self._count & 0xFFFF
 
     @count.setter
     def count(self, value: int):
-        self._count = value & 0xFFFF
+        self._count = value
 
     @cached_property
     def masker(self):
@@ -84,8 +100,13 @@ class VMessBodyEncoder:
             Cipher(algorithms.AES(self.body_key), modes.CFB(self.body_iv)).decryptor(),
         )
 
+
+@dataclass
+class VMessBodyEncoder(_VMessBodyEncodingBase):
     def encode(
-        self, data: bytes, padding_generator: Callable[[int], bytes] = token_bytes
+        self,
+        data: bytes,
+        padding_generator: Callable[[int], bytes] = token_bytes,
     ) -> bytes:
         if not self.options & VMessBodyOptions.CHUNK_STREAM:
             if self.cipher_pair is not None:
@@ -135,25 +156,100 @@ class VMessBodyEncoder:
         self.count += 1
         return packet
 
-    def decode_once(self, reader: BaseReader, verify_checksum: bool = True) -> bytes:
-        if self.cipher_pair is not None:
-            _, decryptor = self.cipher_pair
-            reader = StreamCipherReader(reader, decryptor)
 
-        if not self.options & VMessBodyOptions.CHUNK_STREAM and (
-            isinstance(reader, StreamCipherReader)
-            or self.security is VMessBodySecurity.NONE
-        ):
-            return reader.read_all()
+class VMessBodyDecoderState(enum.IntEnum):
+    HEADER = enum.auto()
+    DATA = enum.auto()
+    PADDING = enum.auto()
 
-        if self.options & VMessBodyOptions.GLOBAL_PADDING and not (
-            self.security is VMessBodySecurity.NONE
-            and self.command in (VMessBodyCommand.TCP, VMessBodyCommand.MUX)
-        ):
-            padding_length = self.masker.read_uint16() % 64
-        else:
-            padding_length = 0
 
+@dataclass
+class VMessBodyDecoder(_VMessBodyEncodingBase):
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.reader = BytesReader(b"")
+        match self.cipher_pair:
+            case (_, decryptor):
+                self.encrypted_reader = StreamCipherReader(self.reader, decryptor)
+            case _:
+                self.encrypted_reader = None
+        self.state = VMessBodyDecoderState.HEADER
+        self._decoder = self._decode()
+
+    def decode(self, data: bytes):
+        self.reader.append(data)
+
+        chunks: list[bytes] = []
+        for chunk in self._decoder:
+            if chunk is None:
+                break
+            chunks.append(chunk)
+        return chunks
+
+    def _decode(self):
+        reader = self.encrypted_reader or self.reader
+
+        content_length = None
+        padding_length = 0
+        while True:
+            if not self.options & VMessBodyOptions.CHUNK_STREAM and (
+                isinstance(reader, StreamCipherReader)
+                or self.security is VMessBodySecurity.NONE
+            ):
+                self.state = VMessBodyDecoderState.DATA
+                yield reader.read_all() if reader.remaining else None
+                continue
+
+            match self.state:
+                case VMessBodyDecoderState.HEADER:
+                    if not self.reader.remaining:
+                        yield
+                        continue
+                    content_length = self._decode_header(reader)
+                    if content_length is None:
+                        yield
+                        continue
+                    self.state = VMessBodyDecoderState.DATA
+                case VMessBodyDecoderState.DATA:
+                    assert content_length is not None
+                    length, padding_length = content_length
+                    decrypted_data = self._decode_body(reader, length - padding_length)
+                    if decrypted_data is None:
+                        yield
+                        continue
+                    yield decrypted_data
+
+                    if padding_length > 0:
+                        self.state = VMessBodyDecoderState.PADDING
+                    else:
+                        self.state = VMessBodyDecoderState.HEADER
+                case VMessBodyDecoderState.PADDING:
+                    padding = self._decode_padding(reader, padding_length)
+                    if padding is None:
+                        yield
+                        continue
+                    self.state = VMessBodyDecoderState.HEADER
+        return
+
+    @staticmethod
+    def _fail_safe_decode(func: Callable[_P, _R]) -> Callable[_P, _R | None]:
+        @wraps(func)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs):
+            try:
+                return func(*args, **kwargs)
+            except ReadOutOfBoundError as e:
+                logger.debug(
+                    "not enough data to decode, requested=%d, remaining=%d",
+                    e.requested,
+                    e.remaining,
+                )
+                return None
+
+        return wrapper
+
+    @_fail_safe_decode
+    def _decode_header(self, reader: BaseReader):
         if (
             self.options & VMessBodyOptions.AUTHENTICATED_LENGTH
             and self.length_aead is not None
@@ -164,27 +260,44 @@ class VMessBodyEncoder:
             )
             length = int.from_bytes(decrypted_length, "big") + 16
         elif self.options & VMessBodyOptions.CHUNK_MASKING:
-            length = reader.read_uint16() ^ self.masker.read_uint16()
+            encrypted_length, length = reader.read_uint16(), None
         else:
-            length = reader.read_uint16()
+            length = encrypted_length = reader.read_uint16()
 
-        content_length = length - padding_length
+        if self.options & VMessBodyOptions.GLOBAL_PADDING and not (
+            self.security is VMessBodySecurity.NONE
+            and self.command in (VMessBodyCommand.TCP, VMessBodyCommand.MUX)
+        ):
+            padding_length = self.masker.read_uint16() % 64
+        else:
+            padding_length = 0
+
+        if length is None:
+            assert isinstance(encrypted_length, int)
+            length = encrypted_length ^ self.masker.read_uint16()
+
+        return length, padding_length
+
+    @_fail_safe_decode
+    def _decode_body(self, reader: BaseReader, length: int):
+        encrypted_data = reader.read(length)
 
         match self.security:
             case VMessBodySecurity.AES_128_CFB:
-                checksum = reader.read_uint32()
-                data = reader.read(content_length - 4)
-                if verify_checksum and checksum != fnv1a32(data):
+                checksum = int.from_bytes(encrypted_data[:4], "big")
+                data = encrypted_data[4:]
+                if self.verify_checksum and checksum != fnv1a32(data):
                     raise ValueError("Checksum mismatch")  # pragma: no cover
             case _ if self.aead is not None:
-                encrypted_data = reader.read(content_length)
                 data = self.aead.decrypt(self.aead_nonce, encrypted_data, None)
             case VMessBodySecurity.NONE:
-                data = reader.read(content_length)
+                data = encrypted_data
             case _:  # pragma: no cover
                 raise ValueError(f"Unknown {self.security=}")
 
-        if padding_length > 0:
-            reader.read(padding_length)
         self.count += 1
         return data
+
+    @_fail_safe_decode
+    def _decode_padding(self, reader: BaseReader, padding_length: int):
+        return reader.read(padding_length)
