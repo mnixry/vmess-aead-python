@@ -1,3 +1,4 @@
+from .encoding import VMessBodyDecoder as VMessBodyDecoder
 from .encoding import VMessBodyEncoder as VMessBodyEncoder
 from .enums import VMessBodyAddressType as VMessBodyAddressType
 from .enums import VMessBodyCommand as VMessBodyCommand
