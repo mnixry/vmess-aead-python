@@ -14,7 +14,7 @@ from vmess_aead.enums import (
 )
 from vmess_aead.kdf import KDFSaltConst, kdf12, kdf16
 from vmess_aead.utils import cmd_key, fnv1a32
-from vmess_aead.utils.reader import BaseReader, BytesReader
+from vmess_aead.utils.reader import BaseReader, BufferedReader, BytesReader
 
 
 @dataclass
@@ -29,7 +29,9 @@ class VMessAuthID:
         key = kdf16(cmd_key(user_id), [KDFSaltConst.AUTH_ID_ENCRYPTION_KEY])
         cipher = Cipher(algorithms.AES(key), modes.ECB())
         decryptor = cipher.decryptor()
-        reader = BytesReader(decryptor.update(encrypted) + decryptor.finalize())
+        reader = BufferedReader(
+            BytesReader(decryptor.update(encrypted) + decryptor.finalize())
+        )
         timestamp = reader.read_uint64()
         rand = reader.read(4)
         checksum_body = reader.read_before()
@@ -82,7 +84,7 @@ class VMessPlainPacketHeader:
 
     @classmethod
     def from_packet(cls, packet: bytes, verify_checksum: bool = True):
-        reader = BytesReader(packet)
+        reader = BufferedReader(BytesReader(packet))
         version = reader.read_byte()
         body_iv = reader.read(16)
         body_key = reader.read(16)
