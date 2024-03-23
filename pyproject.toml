@@ -14,6 +14,7 @@ license = { text = "MIT" }
 cli = [
     "rich>=13.7.0",      # Rich is used to support colored logging
     "typer[all]>=0.9.0", # Typer is used to support command line interface
+    "multidict>=6.0.5",
 ]
 
 [build-system]
