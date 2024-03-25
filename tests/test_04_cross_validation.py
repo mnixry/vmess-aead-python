@@ -65,11 +65,11 @@ def v2ray_server(v2ray_core: Path):
     sock = socket.socket()
     sock.settimeout(5)
     # Wait for server to start
-    for _ in range(10):
+    for _ in range(10):  # pragma: no branch
         try:
             sock.connect(("localhost", 10086))
             break
-        except Exception:
+        except Exception:  # pragma: no cover
             time.sleep(0.5)
     sock.close()
 
