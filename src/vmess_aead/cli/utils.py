@@ -17,7 +17,7 @@ class TransferSpeed:
     """use SI unit (1 KB = 1000 bytes) or IEC unit (1 KiB = 1024 bytes)"""
 
     @staticmethod
-    def _digit_scale(value: float | int, base: int) -> str:
+    def _digit_scale(value: float, base: int) -> str:
         scales = ["", "K", "M", "G", "T", "P", "E", "Z", "Y"]
         scale = 0
         while value >= base:
