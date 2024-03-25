@@ -1,6 +1,7 @@
 import asyncio
 import enum
 import logging
+import time
 from base64 import b64decode
 from dataclasses import dataclass
 from http import HTTPMethod, HTTPStatus
@@ -9,6 +10,7 @@ from urllib.parse import ParseResult, urlparse
 from multidict import CIMultiDict
 
 from vmess_aead.cli.client import VMessClientConfig, VMessClientProtocol
+from vmess_aead.cli.utils import compare_iterable
 from vmess_aead.enums import VMessBodyCommand
 from vmess_aead.utils.reader import BaseReader, BytesReader
 
@@ -43,17 +45,18 @@ class H11RequestHeader:
     keep_alive: bool
     headers: CIMultiDict[str]
 
-    @classmethod
-    def from_packet(cls, reader: BaseReader):
-        request_line = reader.read_until(_CRLF)
-
-        match request_line.decode(errors="ignore").split(" "):
+    @staticmethod
+    def _parse_request_line(request_line: bytes):
+        match request_line.strip().split(b" "):
             case [method, uri, protocol]:
                 pass
             case _:
                 raise HTTPProxyProtocolError("Invalid request line")
 
-        if protocol.strip() != _HTTP_1_1:
+        method = method.decode()
+        uri = uri.decode()
+
+        if protocol != _HTTP_1_1.encode():
             raise HTTPProxyProtocolError(
                 "Unsupported protocol version",
                 HTTPStatus.HTTP_VERSION_NOT_SUPPORTED,
@@ -77,16 +80,32 @@ class H11RequestHeader:
             case _:
                 dest = None
 
+        return method, dest, url
+
+    @classmethod
+    def from_packet(cls, reader: BaseReader):
+        state = H11HeaderParserState.REQUEST_LINE
+
         headers = CIMultiDict[str]()
         while True:
-            line = reader.read_until(_CRLF).decode().strip()
-            if not line:
-                break
-            match line.split(": "):
-                case [k, v]:
-                    headers[k] = v
+            match state:
+                case H11HeaderParserState.REQUEST_LINE if reader.remaining:
+                    request_line = reader.read_until(_CRLF)
+                    parsed_request_line = cls._parse_request_line(request_line)
+                    state = H11HeaderParserState.HEADER
+                case H11HeaderParserState.HEADER if reader.remaining:
+                    line = reader.read_until(_CRLF).strip()
+                    if not line:
+                        state = H11HeaderParserState.END
+                        continue
+                    k, s, v = line.partition(b": ")
+                    if not s:
+                        raise HTTPProxyProtocolError("Invalid header")
+                    headers[k.decode()] = v.decode()
+                case H11HeaderParserState.END:
+                    break
                 case _:
-                    raise HTTPProxyProtocolError("Invalid header")
+                    yield
 
         match headers.pop("Proxy-Authorization", None):
             case str(auth):
@@ -103,7 +122,8 @@ class H11RequestHeader:
 
         keep_alive = headers.pop("Proxy-Connection", "").lower() == "keep-alive"
 
-        return cls(method, dest, url, auth, keep_alive, headers)
+        method, dest, url = parsed_request_line  # type: ignore
+        yield cls(method, dest, url, auth, keep_alive, headers)
 
     def to_packet(self):
         if not self.url:
@@ -125,34 +145,42 @@ class H11ResponseHeader:
 
     @classmethod
     def from_packet(cls, reader: BaseReader):
-        status_line = reader.read_until(_CRLF)
-
-        match status_line.decode(errors="ignore").split(" "):
-            case [protocol, status_code, status_message]:
-                status_code = int(status_code)
-            case _:
-                raise HTTPProxyProtocolError("Invalid status line")
-
-        if protocol.strip() != _HTTP_1_1:
-            raise HTTPProxyProtocolError(
-                "Unsupported protocol version",
-                HTTPStatus.HTTP_VERSION_NOT_SUPPORTED,
-            )
+        state = H11HeaderParserState.REQUEST_LINE
 
         headers = CIMultiDict[str]()
         while True:
-            line = reader.read_until(_CRLF).decode().strip()
-            if not line:
-                break
-            match line.split(": "):
-                case [k, v]:
-                    headers[k] = v.strip()
+            match state:
+                case H11HeaderParserState.REQUEST_LINE if reader.remaining:
+                    status_line = reader.read_until(_CRLF)
+                    match status_line.strip().split(b" "):
+                        case [protocol, status_code, status_message]:
+                            status_code = int(status_code)
+                            status_message = status_message.decode()
+                        case _:
+                            raise HTTPProxyProtocolError("Invalid status line")
+                    if protocol != _HTTP_1_1.encode():
+                        raise HTTPProxyProtocolError(
+                            f"Unsupported protocol version {protocol=}",
+                            HTTPStatus.HTTP_VERSION_NOT_SUPPORTED,
+                        )
+                    state = H11HeaderParserState.HEADER
+                case H11HeaderParserState.HEADER if reader.remaining:
+                    line = reader.read_until(_CRLF).strip()
+                    if not line:
+                        state = H11HeaderParserState.END
+                        continue
+                    k, s, v = line.partition(b": ")
+                    if not s:
+                        raise HTTPProxyProtocolError("Invalid header")
+                    headers[k.decode()] = v.decode()
+                case H11HeaderParserState.END:
+                    break
                 case _:
-                    raise HTTPProxyProtocolError("Invalid header")
+                    yield
 
         content_length = int(headers.get("Content-Length", -1))
 
-        return cls(int(status_code), status_message, content_length, headers)
+        yield cls(int(status_code), status_message, content_length, headers)  # type: ignore
 
     def to_packet(self):
         header = f"{_HTTP_1_1} {self.status_code} {self.status_message}\r\n"
@@ -163,9 +191,9 @@ class H11ResponseHeader:
 
 
 class HTTPProxyProtocolState(enum.IntEnum):
-    HANDSHAKE = 0
-    CONNECT = 1
-    PLAIN_HTTP = 2
+    HANDSHAKE = enum.auto()
+    CONNECT = enum.auto()
+    FORWARD = enum.auto()
 
 
 class HTTPProxyProtocol(asyncio.Protocol):
@@ -177,12 +205,17 @@ class HTTPProxyProtocol(asyncio.Protocol):
         config: VMessClientConfig,
         *,
         auth: tuple[str, str] | None = None,
+        keep_alive_timeout: int = 5,
     ) -> None:
         self.config = config
         self.auth = auth
+        self.keep_alive_timeout = keep_alive_timeout
 
         self.reader = BytesReader(b"")
         self.state = HTTPProxyProtocolState.HANDSHAKE
+
+        self.request_parser = None
+        self.recent_activity = 0.0
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         assert isinstance(transport, asyncio.Transport)
@@ -198,10 +231,12 @@ class HTTPProxyProtocol(asyncio.Protocol):
         return self.transport.get_extra_info("sockname")
 
     def data_received(self, data: bytes) -> None:
+        self.recent_activity = time.monotonic()
         self.reader.append(data)
         try:
             self._data_received()
         except HTTPProxyProtocolError as e:
+            logger.exception("HTTP Proxy error", exc_info=e)
             logger.debug(
                 "HTTP Proxy error: %d %s from %s:%s",
                 e.code,
@@ -214,20 +249,34 @@ class HTTPProxyProtocol(asyncio.Protocol):
         match self.state:
             case HTTPProxyProtocolState.HANDSHAKE:
                 self._handshake()
-            case HTTPProxyProtocolState.CONNECT:
+            case HTTPProxyProtocolState.CONNECT if self.remote_protocol:
+                self.remote_protocol.send_data(self.reader.read_all())
+            case HTTPProxyProtocolState.FORWARD:
                 assert self.remote_protocol
                 self.remote_protocol.send_data(self.reader.read_all())
-            case HTTPProxyProtocolState.PLAIN_HTTP:
-                assert self.remote_protocol
-                self.remote_protocol.send_data(self.reader.read_all())
+        return
 
     def _handshake(self) -> None:
-        request = H11RequestHeader.from_packet(self.reader)
-        if self.auth and self.auth != request.auth:
+        if self.request_parser is None:
+            self.request_parser = H11RequestHeader.from_packet(self.reader)
+        try:
+            request = next(self.request_parser)
+        except StopIteration as e:
+            raise HTTPProxyProtocolError("Invalid request") from e
+
+        if request is None:
+            return
+
+        if self.auth and not (
+            request.auth and compare_iterable(self.auth, request.auth)
+        ):
             raise HTTPProxyProtocolError(
                 "Proxy authentication failed", HTTPStatus.PROXY_AUTHENTICATION_REQUIRED
             )
+
         self.request = request
+        self.request_parser = None
+        self.state = HTTPProxyProtocolState.CONNECT
 
         if self.request.method == HTTPMethod.CONNECT:
             task = asyncio.create_task(self._handle_connect())
@@ -253,7 +302,6 @@ class HTTPProxyProtocol(asyncio.Protocol):
         self.transport.write(f"{_HTTP_1_1} 200 Connection established\r\n\r\n".encode())
         protocol.send_data(self.reader.read_all())
         await protocol.wait_connection()
-
         self.state = HTTPProxyProtocolState.CONNECT
 
         async for data in protocol.recv_data():
@@ -276,7 +324,7 @@ class HTTPProxyProtocol(asyncio.Protocol):
         host, port = self.request.dest
 
         loop = asyncio.get_event_loop()
-        _, protocol = await loop.create_connection(
+        remote_transport, protocol = await loop.create_connection(
             lambda: VMessClientProtocol(
                 host, port, VMessBodyCommand.TCP, config=self.config
             ),
@@ -288,28 +336,48 @@ class HTTPProxyProtocol(asyncio.Protocol):
         protocol.send_data(self.reader.read_all())
         await protocol.wait_connection()
 
-        data_recv = protocol.recv_data()
+        data_iterator = protocol.recv_data()
 
-        response = await anext(data_recv)
-        response_reader = BytesReader(response)
-        response_header = H11ResponseHeader.from_packet(response_reader)
+        response_reader = BytesReader(b"")
+        response_header = None
+        for response_header in H11ResponseHeader.from_packet(response_reader):
+            if response_header:
+                break
+            response_reader.append(await anext(data_iterator))
 
-        self.state = HTTPProxyProtocolState.PLAIN_HTTP
-
+        self.state = HTTPProxyProtocolState.FORWARD
+        assert response_header
         if remote_keep_alive := response_header.content_length >= 0:
             response_header.headers["Proxy-Connection"] = "keep-alive"
             response_header.headers["Connection"] = "keep-alive"
-            response_header.headers["Keep-Alive"] = "timeout=5, max=1000"
+            response_header.headers["Keep-Alive"] = (
+                f"timeout={self.keep_alive_timeout}, max=1000"
+            )
+
+        def recent_activity_checker():
+            if (
+                time.monotonic() - self.recent_activity <= self.keep_alive_timeout
+                or self.state is not HTTPProxyProtocolState.HANDSHAKE
+                or self.transport.is_closing()
+            ):
+                return
+            logger.debug(
+                "no recent activity, closing keep-alive connection from %s:%s",
+                *self.peer_address,
+            )
+            self.transport.write_eof()
+            remote_transport.close()
 
         self.transport.write(response_header.to_packet())
         if response_reader.remaining:
             self.transport.write(response_reader.read_all())
 
-        async for data in data_recv:
+        async for data in data_iterator:
             self.transport.write(data)
 
-        protocol.transport.write_eof()
+        remote_transport.write_eof()
         if remote_keep_alive and self.request.keep_alive:
+            loop.call_later(self.keep_alive_timeout, recent_activity_checker)
             self.state = HTTPProxyProtocolState.HANDSHAKE
             self.reader.read_all()
         else:
@@ -348,7 +416,7 @@ class HTTPProxyProtocol(asyncio.Protocol):
         self._close_with_error(new_exc)
 
     def _close_with_error(self, error: HTTPProxyProtocolError):
-        if self.state is HTTPProxyProtocolState.HANDSHAKE:
+        if self.state is not HTTPProxyProtocolState.FORWARD:
             message = (
                 f"{_HTTP_1_1} {error.code} {error.message}\r\n"
                 "Connection: close\r\n"
@@ -358,3 +426,20 @@ class HTTPProxyProtocol(asyncio.Protocol):
             )
             self.transport.write(message.encode())
         self.transport.close()
+
+    def eof_received(self) -> bool | None:
+        if self.remote_protocol:
+            self.remote_protocol.send_data(b"")
+            self.remote_protocol.transport.write_eof()
+        logger.info("EOF received from HTTP proxy client %s:%s", *self.peer_address)
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        if self.remote_protocol:
+            self.remote_protocol.transport.close()
+        if exc:
+            logger.exception(
+                "Connection from http proxy client %s:%s lost due to unexpected error",
+                *self.peer_address,
+                exc_info=exc,
+            )
+        return
