@@ -46,7 +46,14 @@ exclude_also = [
     "raise AssertionError",
     "raise NotImplementedError",
     "@(abc\\.)?abstractmethod",
+    # Pytest
+    "if __name__ == .__main__.:",
+    "pytest\\.skip",
+    "pytest\\.mark\\.skip",
 ]
+
+[tool.pyright]
+typeCheckingMode = "standard"
 
 [tool.ruff]
 lint.select = [
