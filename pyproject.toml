@@ -40,6 +40,14 @@ omit = [
     "**/cli/*.py", # Skip the CLI coverage report
 ]
 
+[tool.coverage.report]
+exclude_also = [
+    # Skip abstract methods
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+]
+
 [tool.ruff]
 lint.select = [
     "E",   # pycodestyle
