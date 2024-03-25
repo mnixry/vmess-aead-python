@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from enum import IntEnum
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from logging import getLogger
-from secrets import compare_digest
 
 from vmess_aead.cli.client import VMessClientConfig, VMessClientProtocol
+from vmess_aead.cli.utils import compare_iterable
 from vmess_aead.enums import VMessBodyCommand
 from vmess_aead.utils.reader import BaseReader, BytesReader
 
@@ -254,23 +254,14 @@ class Socks5Protocol(asyncio.Protocol):
         auth_response = b"\x05"
         auth_success = False
         match self.auth:
-            case (
-                expected_username,
-                expected_password,
-            ) if SocksAuthMethodType.USERNAME_PASSWORD in methods:
+            case tuple(expected) if SocksAuthMethodType.USERNAME_PASSWORD in methods:
                 auth_response += b"\x02"  # username/password authentication
                 if (version := self.reader.read_byte()) != 1:
                     raise SocksProtocolError(f"invalid authentication {version=}")
                 auth_response += b"\x01"  # version
-                username_input = self.reader.read(self.reader.read_byte()).decode()
-                password_input = self.reader.read(self.reader.read_byte()).decode()
-                if compare_digest(
-                    username_input,
-                    expected_username,
-                ) and compare_digest(
-                    password_input,
-                    expected_password,
-                ):
+                username = self.reader.read(self.reader.read_byte()).decode()
+                password = self.reader.read(self.reader.read_byte()).decode()
+                if compare_iterable((username, password), expected):
                     auth_response += b"\x00"  # success
                     auth_success = True
                 else:

@@ -1,6 +1,8 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 from logging import getLogger
+from secrets import compare_digest
 from typing import Literal
 
 logger = getLogger(__name__)
@@ -53,3 +55,11 @@ class TransferSpeed:
             f", at {self.human_readable_rate} rate"
         )
         return text
+
+
+def compare_iterable(actual_iter: Iterable[str], expected_iter: Iterable[str]) -> bool:
+    """Compare two iterable of strings in constant time."""
+    return all(
+        compare_digest(actual, expected)
+        for actual, expected in zip(actual_iter, expected_iter, strict=True)
+    )
