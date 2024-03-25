@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "VMessAEAD packet parser for python."
 authors = [{ name = "Mix", email = "32300164+mnixry@users.noreply.github.com" }]
 dependencies = [
-    "cryptography>=42.0.0", # 42.0.0 is the first version that supports SM4-GCM
+    "cryptography>=42.0.0", # Cryptography 42.0.0 is the first version that supports SM4-GCM
 ]
 requires-python = ">=3.10"
 readme = "README.md"
@@ -14,7 +14,7 @@ license = { text = "MIT" }
 cli = [
     "rich>=13.7.0",       # Rich is used to support colored logging
     "typer[all]>=0.10.0", # Typer is used to support command line interface
-    "multidict>=6.0.5",
+    "multidict>=6.0.5",   # Multidict is used to support HTTP headers parsing
 ]
 
 [build-system]
@@ -30,7 +30,7 @@ dev = [
 ]
 
 [tool.pdm.scripts]
-test = { cmd = ["pytest", "--cov", "./src/", "--cov-report=term-missing", "."] }
+test = "pytest --cov --cov-report=term-missing ."
 format = "ruff format"
 lint = "ruff check"
 
@@ -50,23 +50,23 @@ exclude_also = [
 
 [tool.ruff]
 lint.select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
     "ASYNC", # flake8-async
     "B",     # flake8-bugbear
-    "C4",    # flake8-comprehensions
-    "E",     # pycodestyle errors
-    "F",     # Pyflakes
-    "I",     # isort
-    "PT",    # flake8-pytest-style
-    "PYI",   # flake8-pyi
-    "Q",     # flake8-quotes
-    "RUF",   # Ruff-specific rules
+    "C4",    # flake8-comprehensions    
     "SIM",   # flake8-simplify
     "T10",   # flake8-debugger
     "T20",   # flake8-print
+    "PYI",   # flake8-pyi
+    "PT",    # flake8-pytest-style
+    "Q",     # flake8-quotes
+    "F",     # Pyflakes
+    "I",     # isort
     "UP",    # pyupgrade
-    "W",     # pycodestyle warnings
+    "RUF",   # Ruff-specific rules
 ]
 lint.ignore = [
-    'B008', # Do not perform calls in argument defaults
+    "B008", # Do not perform calls in argument defaults
 ]
 target-version = "py310"
