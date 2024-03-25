@@ -33,7 +33,7 @@ class VMessResponseCommand(abc.ABC, Generic[_IDT]):
     @classmethod
     @abc.abstractmethod
     def from_packet(cls, command_id: int, packet: bytes) -> "VMessResponseCommand":
-        raise NotImplementedError  # pragma: no cover
+        raise NotImplementedError
 
     def _wrap(self, command_packet: bytes):
         packet = b""
@@ -45,7 +45,7 @@ class VMessResponseCommand(abc.ABC, Generic[_IDT]):
 
     @abc.abstractmethod
     def to_packet(self):
-        raise NotImplementedError  # pragma: no cover
+        raise NotImplementedError
 
 
 @dataclass

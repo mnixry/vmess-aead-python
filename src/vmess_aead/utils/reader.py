@@ -14,20 +14,20 @@ class BaseReader(abc.ABC):
     @property
     @abc.abstractmethod
     def offset(self) -> int:
-        raise NotImplementedError  # pragma: no cover
+        raise NotImplementedError
 
     @property
     @abc.abstractmethod
     def remaining(self) -> int:
-        raise NotImplementedError  # pragma: no cover
+        raise NotImplementedError
 
     @abc.abstractmethod
     def read(self, length: int) -> bytes:
-        raise NotImplementedError  # pragma: no cover
+        raise NotImplementedError
 
     @abc.abstractmethod
     def read_all(self) -> bytes:
-        raise NotImplementedError  # pragma: no cover
+        raise NotImplementedError
 
     def read_byte(self) -> int:
         return self.read(1)[0]
