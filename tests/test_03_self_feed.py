@@ -48,7 +48,7 @@ def bitmask_combination(*enums: VMessBodyOptions):
 @pytest.mark.parametrize("security", [*VMessBodySecurity], ids=lambda x: x.name)
 @pytest.mark.parametrize("command", [*VMessBodyCommand], ids=lambda x: x.name)
 @pytest.mark.parametrize(
-    "address_type, address",
+    ("address_type", "address"),
     [
         (VMessBodyAddressType.IPV4, IPv4Address("1.1.1.1")),
         (VMessBodyAddressType.DOMAIN, "example.com"),

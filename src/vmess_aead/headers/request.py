@@ -235,7 +235,8 @@ class VMessAEADRequestPacketHeader:
     def to_packet(self, user_id: UUID):
         packet = b""
         packet += (encrypted_auth_id := self.auth_id.to_packet(user_id))
-        assert len(encrypted_auth_id) == 16 and len(self.nonce) == 8
+        assert len(encrypted_auth_id) == 16
+        assert len(self.nonce) == 8
 
         payload_header_key = kdf16(
             cmd_key(user_id),
