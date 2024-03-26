@@ -28,7 +28,7 @@ class VMessServerProtocol(asyncio.Protocol):
         self.user_id = user_id
         self.enable_udp = enable_udp
 
-        self.reader = BytesReader(b"")
+        self.reader = BytesReader()
         self.data_transferred = 0
         self.start_time = time.time()
 

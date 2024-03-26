@@ -66,7 +66,7 @@ class VMessClientProtocol(asyncio.Protocol):
         self.options = config.options
         self.timeout = config.timeout
 
-        self.reader = BytesReader(b"")
+        self.reader = BytesReader()
         self.bytes_received = 0
         self.bytes_sent = 0
         self.establish_time = time.time()

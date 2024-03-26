@@ -168,7 +168,7 @@ class VMessBodyDecoder(_VMessBodyEncodingBase):
     def __post_init__(self):
         super().__post_init__()
 
-        self.reader = BytesReader(b"")
+        self.reader = BytesReader()
         match self.cipher_pair:
             case (_, decryptor):
                 self.encrypted_reader = StreamCipherReader(self.reader, decryptor)

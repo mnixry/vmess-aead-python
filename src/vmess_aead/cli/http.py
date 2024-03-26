@@ -211,7 +211,7 @@ class HTTPProxyProtocol(asyncio.Protocol):
         self.auth = auth
         self.keep_alive_timeout = keep_alive_timeout
 
-        self.reader = BytesReader(b"")
+        self.reader = BytesReader()
         self.state = HTTPProxyProtocolState.HANDSHAKE
 
         self.request_parser = None
@@ -338,7 +338,7 @@ class HTTPProxyProtocol(asyncio.Protocol):
 
         data_iterator = protocol.recv_data()
 
-        response_reader = BytesReader(b"")
+        response_reader = BytesReader()
         response_header = None
         for response_header in H11ResponseHeader.from_packet(response_reader):
             if response_header:
