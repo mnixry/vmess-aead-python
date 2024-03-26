@@ -36,8 +36,8 @@ class VMessHash(abc.ABC):
 
 
 class Sha256Hash(VMessHash):
-    def __init__(self, hash: Optional["hashlib._Hash"] = None) -> None:
-        self._hash = hash or hashlib.sha256()
+    def __init__(self, hash_: Optional["hashlib._Hash"] = None) -> None:
+        self._hash = hash_ or hashlib.sha256()
 
     def update(self, data: bytes) -> None:
         self._hash.update(data)
