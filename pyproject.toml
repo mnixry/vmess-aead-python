@@ -59,21 +59,30 @@ typeCheckingMode = "standard"
 lint.select = [
     "E",     # pycodestyle errors
     "W",     # pycodestyle warnings
+    "A",     # flake8-builtins
     "ASYNC", # flake8-async
     "B",     # flake8-bugbear
-    "C4",    # flake8-comprehensions    
+    "C4",    # flake8-comprehensions
+    "G",     # flake8-logging-format 
+    "LOG",   # flake8-logging
+    "PT",    # flake8-pytest-style
+    "PYI",   # flake8-pyi
+    "Q",     # flake8-quotes
+    "RSE",   # flake8-raise
     "SIM",   # flake8-simplify
+    "SLF",   # flake8-self
     "T10",   # flake8-debugger
     "T20",   # flake8-print
-    "PYI",   # flake8-pyi
-    "PT",    # flake8-pytest-style
-    "Q",     # flake8-quotes
     "F",     # Pyflakes
+    "TRY",   # tryceratops
     "I",     # isort
     "UP",    # pyupgrade
+    "C90",   # complexity
+    "N",     # naming
     "RUF",   # Ruff-specific rules
 ]
 lint.ignore = [
-    "B008", # Do not perform calls in argument defaults
+    "B008",   # Do not perform calls in argument defaults
+    "TRY003", # Avoid specifying long messages outside the exception class
 ]
 target-version = "py310"
