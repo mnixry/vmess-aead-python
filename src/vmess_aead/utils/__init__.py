@@ -18,9 +18,8 @@ def cmd_key(uuid: uuid.UUID) -> bytes:
 def fnv1a32(data: bytes) -> int:
     hash_ = 0x811C9DC5
     for byte in data:
-        hash_ ^= byte
-        hash_ *= 0x01000193
-    return hash_ & 0xFFFFFFFF
+        hash_ = 0x01000193 * (hash_ ^ byte) & 0xFFFFFFFF
+    return hash_
 
 
 class Shake128Reader(BaseReader):
@@ -96,8 +95,7 @@ class SM4GCM:
     ) -> bytes:
         assert len(nonce) == 12
         if tag is None:
-            tag = tag or data[-16:]
-            data = data[:-16]
+            tag, data = data[-16:], data[:-16]
         decryptor = Cipher(self._algorithm, modes.GCM(nonce, tag)).decryptor()
         if associated_data is not None:
             decryptor.authenticate_additional_data(associated_data)
