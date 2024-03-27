@@ -4,7 +4,7 @@ import logging
 import time
 import uuid
 from functools import cached_property
-from typing import Any
+from typing import cast
 
 from vmess_aead.cli.utils import TransferSpeed
 from vmess_aead.encoding import VMessBodyDecoder, VMessBodyEncoder
@@ -16,13 +16,12 @@ from vmess_aead.utils.reader import BytesReader
 logger = logging.getLogger(__name__)
 
 
-_NetworkTransport = asyncio.DatagramTransport | asyncio.WriteTransport
 _MAX_PACKET_SIZE = 0xFFFF - 0xFF  # 64KB minus additional overhead
 
 
 class VMessServerProtocol(asyncio.Protocol):
     header: VMessAEADRequestPacketHeader | None = None
-    remote_transport: _NetworkTransport | None = None
+    remote_transport: asyncio.BaseTransport | None = None
 
     def __init__(self, user_id: uuid.UUID, *, enable_udp: bool = True) -> None:
         self.user_id = user_id
@@ -30,7 +29,7 @@ class VMessServerProtocol(asyncio.Protocol):
 
         self.reader = BytesReader()
         self.data_transferred = 0
-        self.start_time = time.time()
+        self.start_time = time.monotonic()
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         assert isinstance(transport, asyncio.Transport)
@@ -131,7 +130,7 @@ class VMessServerProtocol(asyncio.Protocol):
         self.transport.write(resp_header.to_packet(resp_key, resp_iv))
 
     def _remote_connection_made(
-        self, ret: asyncio.Task[tuple[_NetworkTransport, Any]]
+        self, ret: asyncio.Task[tuple[asyncio.BaseTransport, asyncio.BaseProtocol]]
     ) -> None:
         if ret.cancelled():
             self.transport.close()
@@ -142,36 +141,39 @@ class VMessServerProtocol(asyncio.Protocol):
             return
         self.remote_transport, _ = ret.result()
 
-        if isinstance(self.remote_transport, asyncio.DatagramTransport):
-            self.remote_send = self.remote_transport.sendto
+        assert self.header
+        # Since bugs in Python <= 3.11, we cannot determine the type of remote_transport
+        # Ref: https://github.com/python/cpython/pull/98844
+        if self.header.payload.command is VMessBodyCommand.UDP:
+            transport = cast(asyncio.DatagramTransport, self.remote_transport)
+            self.remote_send = transport.sendto
         else:
-            self.remote_send = self.remote_transport.write
+            transport = cast(asyncio.WriteTransport, self.remote_transport)
+            self.remote_send = transport.write
 
-        if self.reader.remaining:
-            self._feed_body(self.reader.read_all())
+        self._feed_body(self.reader.read_all())
 
     def _feed_body(self, data: bytes):
         chunks = self.decoder.decode(data)
         for chunk in chunks:
             if not chunk:
                 self.transport.write_eof()
-                if isinstance(self.remote_transport, asyncio.WriteTransport):
-                    self.remote_transport.write_eof()
                 break
             self.remote_send(chunk)
         return
 
     def eof_received(self):
-        time_taken = time.time() - self.start_time
+        time_taken = time.monotonic() - self.start_time
         logger.info(
             "EOF received from local connection %s:%s, %s",
             *self.peer_address,
             TransferSpeed(time_taken, self.data_transferred),
         )
-        if isinstance(self.remote_transport, asyncio.WriteTransport):
-            self.remote_transport.write_eof()
-        elif isinstance(self.remote_transport, asyncio.DatagramTransport):
-            self.remote_transport.close()
+        if self.remote_transport:
+            close_func = getattr(
+                self.remote_transport, "eof_received", self.remote_transport.close
+            )
+            close_func()
 
     def connection_lost(self, exc: Exception | None) -> None:
         if exc is None:
@@ -196,7 +198,7 @@ class VMessServerRemoteConnectionProtocol(asyncio.Protocol):
         self.local_transport = local_transport
 
         self.data_transferred = 0
-        self.start_time = time.time()
+        self.start_time = time.monotonic()
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         assert isinstance(transport, asyncio.Transport)
@@ -216,7 +218,7 @@ class VMessServerRemoteConnectionProtocol(asyncio.Protocol):
             )
 
     def eof_received(self):
-        time_taken = time.time() - self.start_time
+        time_taken = time.monotonic() - self.start_time
         logger.info(
             "EOF received from remote connection %s:%s, %s",
             *self.peer_address,
