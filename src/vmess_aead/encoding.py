@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from functools import cached_property, wraps
 from logging import getLogger
 from secrets import token_bytes
-from typing import ParamSpec, TypeVar
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
@@ -23,10 +22,6 @@ from vmess_aead.utils.reader import (
     ReadOutOfBoundError,
     StreamCipherReader,
 )
-
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-
 
 logger = getLogger(__name__)
 
@@ -235,9 +230,9 @@ class VMessBodyDecoder(_VMessBodyEncodingBase):
         return
 
     @staticmethod
-    def _fail_safe_decode(func: Callable[_P, _R]) -> Callable[_P, _R | None]:
+    def _fail_safe_decode[**P, R](func: Callable[P, R]) -> Callable[P, R | None]:
         @wraps(func)
-        def wrapper(*args: _P.args, **kwargs: _P.kwargs):
+        def wrapper(*args: P.args, **kwargs: P.kwargs):
             try:
                 return func(*args, **kwargs)
             except ReadOutOfBoundError as e:

@@ -1,6 +1,9 @@
+import asyncio
 import hashlib
 import uuid
+from collections.abc import Coroutine
 from functools import lru_cache
+from typing import Any
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -100,3 +103,17 @@ class SM4GCM:
         if associated_data is not None:
             decryptor.authenticate_additional_data(associated_data)
         return decryptor.update(data) + decryptor.finalize()
+
+
+def create_ref_task[T](
+    coro: Coroutine[Any, Any, T], loop: asyncio.AbstractEventLoop | None = None
+) -> asyncio.Task[T]:
+    running_tasks: set[asyncio.Task] = create_ref_task.__dict__.setdefault(
+        "_running_tasks", set()
+    )
+    if loop is None:
+        loop = asyncio.get_running_loop()
+    task = loop.create_task(coro)
+    running_tasks.add(task)
+    task.add_done_callback(running_tasks.discard)
+    return task

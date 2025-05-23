@@ -20,7 +20,7 @@ except ImportError as e:
     ) from e
 
 app = typer.Typer()
-
+logger = logging.getLogger(__name__)
 
 UUIDType = Annotated[
     uuid.UUID,
@@ -71,7 +71,7 @@ def server(
             host=listen_addr,
             port=listen_port,
         )
-        logging.info("Listening on %s:%d", listen_addr, listen_port)
+        logger.info("Listening on %s:%d", listen_addr, listen_port)
 
         async with server:
             with contextlib.suppress(KeyboardInterrupt):
@@ -163,7 +163,7 @@ def client(
             host=listen_addr,
             port=listen_port,
         )
-        logging.info("Listening on %s:%d", listen_addr, listen_port)
+        logger.info("Listening on %s:%d", listen_addr, listen_port)
         async with server:
             with contextlib.suppress(KeyboardInterrupt):
                 await server.serve_forever()

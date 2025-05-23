@@ -11,6 +11,7 @@ from vmess_aead.encoding import VMessBodyDecoder, VMessBodyEncoder
 from vmess_aead.enums import VMessBodyCommand, VMessResponseBodyOptions
 from vmess_aead.headers.request import VMessAEADRequestPacketHeader
 from vmess_aead.headers.response import VMessAEADResponsePacketHeader
+from vmess_aead.utils import create_ref_task
 from vmess_aead.utils.reader import BytesReader
 
 logger = logging.getLogger(__name__)
@@ -95,14 +96,15 @@ class VMessServerProtocol(asyncio.Protocol):
         loop = asyncio.get_running_loop()
 
         if self.header.payload.command is VMessBodyCommand.TCP:
-            remote_task = loop.create_task(
+            remote_task = create_ref_task(
                 loop.create_connection(
                     lambda: VMessServerRemoteConnectionProtocol(
                         remote_encoder, self.transport
                     ),
                     host=str(self.header.payload.address),
                     port=self.header.payload.port,
-                )
+                ),
+                loop=loop,
             )
         elif self.header.payload.command is VMessBodyCommand.UDP:
             if not self.enable_udp:
@@ -112,7 +114,7 @@ class VMessServerProtocol(asyncio.Protocol):
                 )
                 self.transport.close()
                 return
-            remote_task = loop.create_task(
+            remote_task = create_ref_task(
                 loop.create_datagram_endpoint(
                     lambda: VMessServerRemoteDatagramProtocol(
                         remote_encoder, self.transport
@@ -121,7 +123,8 @@ class VMessServerProtocol(asyncio.Protocol):
                         str(self.header.payload.address),
                         self.header.payload.port,
                     ),
-                )
+                ),
+                loop=loop,
             )
         else:
             raise ValueError("Invalid command")

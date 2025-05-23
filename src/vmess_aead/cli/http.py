@@ -12,6 +12,7 @@ from multidict import CIMultiDict
 from vmess_aead.cli.client import VMessClientConfig, VMessClientProtocol
 from vmess_aead.cli.utils import compare_iterable
 from vmess_aead.enums import VMessBodyCommand
+from vmess_aead.utils import create_ref_task
 from vmess_aead.utils.reader import BaseReader, BytesReader
 
 logger = logging.getLogger(__name__)
@@ -279,9 +280,9 @@ class HTTPProxyProtocol(asyncio.Protocol):
         self.state = HTTPProxyProtocolState.CONNECT
 
         if self.request.method == HTTPMethod.CONNECT:
-            task = asyncio.create_task(self._handle_connect())
+            task = create_ref_task(self._handle_connect())
         else:
-            task = asyncio.create_task(self._handle_plain_http())
+            task = create_ref_task(self._handle_plain_http())
         task.add_done_callback(self._connection_exception_handler)
 
     async def _handle_connect(self):

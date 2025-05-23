@@ -9,6 +9,7 @@ from typing import ClassVar
 from vmess_aead.cli.client import VMessClientConfig, VMessClientProtocol
 from vmess_aead.cli.utils import compare_iterable
 from vmess_aead.enums import VMessBodyCommand
+from vmess_aead.utils import create_ref_task
 from vmess_aead.utils.reader import BaseReader, BytesReader
 
 logger = getLogger(__name__)
@@ -288,9 +289,8 @@ class Socks5Protocol(asyncio.Protocol):
 
         match self.dest.command:
             case SocksDestinationCommand.CONNECT:
-                asyncio.create_task(self._connect()).add_done_callback(
-                    self._connect_exception_handler
-                )
+                task = create_ref_task(self._connect())
+                task.add_done_callback(self._connect_exception_handler)
             case _:
                 raise SocksProtocolError(
                     "invalid command",
@@ -414,9 +414,10 @@ class Socks5RelayProtocol(asyncio.DatagramProtocol):
             )
             type(self).connections[connection_tuple] = protocol
 
-            asyncio.create_task(
-                self._create_connection(addr, protocol)
-            ).add_done_callback(lambda fut: self._connection_end_handler(protocol, fut))
+            task = create_ref_task(self._create_connection(addr, protocol))
+            task.add_done_callback(
+                lambda fut: self._connection_end_handler(protocol, fut)
+            )
 
         protocol.send_data(packet.data)
 
