@@ -6,12 +6,11 @@ import uuid
 from functools import cached_property
 from typing import cast
 
-from vmess_aead.cli.utils import TransferSpeed
+from vmess_aead.cli.utils import TransferSpeed, create_ref_task
 from vmess_aead.encoding import VMessBodyDecoder, VMessBodyEncoder
 from vmess_aead.enums import VMessBodyCommand, VMessResponseBodyOptions
 from vmess_aead.headers.request import VMessAEADRequestPacketHeader
 from vmess_aead.headers.response import VMessAEADResponsePacketHeader
-from vmess_aead.utils import create_ref_task
 from vmess_aead.utils.reader import BytesReader
 
 logger = logging.getLogger(__name__)

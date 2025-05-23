@@ -7,9 +7,8 @@ from logging import getLogger
 from typing import ClassVar
 
 from vmess_aead.cli.client import VMessClientConfig, VMessClientProtocol
-from vmess_aead.cli.utils import compare_iterable
+from vmess_aead.cli.utils import compare_iterable, create_ref_task
 from vmess_aead.enums import VMessBodyCommand
-from vmess_aead.utils import create_ref_task
 from vmess_aead.utils.reader import BaseReader, BytesReader
 
 logger = getLogger(__name__)

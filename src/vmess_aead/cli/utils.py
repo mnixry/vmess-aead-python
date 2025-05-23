@@ -1,9 +1,10 @@
-from collections.abc import Iterable
+import asyncio
+from collections.abc import Coroutine, Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 from logging import getLogger
 from secrets import compare_digest
-from typing import Literal
+from typing import Any, Literal
 
 logger = getLogger(__name__)
 
@@ -63,3 +64,17 @@ def compare_iterable(actual_iter: Iterable[str], expected_iter: Iterable[str]) -
         compare_digest(actual, expected)
         for actual, expected in zip(actual_iter, expected_iter, strict=True)
     )
+
+
+def create_ref_task[T](
+    coro: Coroutine[Any, Any, T], loop: asyncio.AbstractEventLoop | None = None
+) -> asyncio.Task[T]:
+    running_tasks: set[asyncio.Task] = create_ref_task.__dict__.setdefault(
+        "_running_tasks", set()
+    )
+    if loop is None:
+        loop = asyncio.get_running_loop()
+    task = loop.create_task(coro)
+    running_tasks.add(task)
+    task.add_done_callback(running_tasks.discard)
+    return task
