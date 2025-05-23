@@ -1,7 +1,4 @@
 {
-    "python.analysis.completeFunctionParens": true,
-    "python.analysis.typeCheckingMode": "standard",
-    "python.languageServer": "Pylance",
     "python.testing.pytestEnabled": true,
     "[python]": {
         "editor.codeActionsOnSave": {
@@ -9,7 +6,6 @@
         },
         "editor.defaultFormatter": "charliermarsh.ruff"
     },
-    "autoDocstring.customTemplatePath": ".vscode/docstring.mustache",
     "editor.formatOnSave": true,
     "files.watcherExclude": {
         "**/.git/objects/**": true,
