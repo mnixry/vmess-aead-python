@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory, mktemp
 from urllib.request import urlretrieve
 
 import pytest
+
 from vmess_aead.encoding import VMessBodyDecoder, VMessBodyEncoder
 from vmess_aead.enums import (
     VMessBodyAddressType,

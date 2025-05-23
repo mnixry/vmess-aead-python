@@ -69,7 +69,7 @@ class VMessClientProtocol(asyncio.Protocol):
         self.reader = BytesReader()
         self.bytes_received = 0
         self.bytes_sent = 0
-        self.establish_time = time.time()
+        self.establish_time = time.monotonic()
         self.send_queue = deque[bytes]()
 
         loop = asyncio.get_running_loop()
@@ -102,7 +102,7 @@ class VMessClientProtocol(asyncio.Protocol):
 
         self.header = VMessAEADRequestPacketHeader(
             auth_id=VMessAuthID(
-                timestamp=int(self.establish_time),
+                timestamp=int(time.time()),
                 rand=token_bytes(4),
             ),
             nonce=token_bytes(8),
@@ -191,8 +191,9 @@ class VMessClientProtocol(asyncio.Protocol):
 
     def connection_lost(self, exc: Exception | None):
         self.data_received_event.set()
-        tx_speed = TransferSpeed(time.time() - self.establish_time, self.bytes_sent)
-        rx_speed = TransferSpeed(time.time() - self.establish_time, self.bytes_received)
+        time_delta = time.monotonic() - self.establish_time
+        tx_speed = TransferSpeed(time_delta, self.bytes_sent)
+        rx_speed = TransferSpeed(time_delta, self.bytes_received)
         logger.info(
             "Connection to %s:%s closed: tx: %s; rx: %s",
             self.host,

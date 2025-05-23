@@ -1,11 +1,10 @@
 import asyncio
 import enum
-import time
-import uuid
 from dataclasses import dataclass
 from enum import IntEnum
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from logging import getLogger
+from typing import ClassVar
 
 from vmess_aead.cli.client import VMessClientConfig, VMessClientProtocol
 from vmess_aead.cli.utils import compare_iterable
@@ -13,6 +12,8 @@ from vmess_aead.enums import VMessBodyCommand
 from vmess_aead.utils.reader import BaseReader, BytesReader
 
 logger = getLogger(__name__)
+
+_AddressUnion = IPv4Address | IPv6Address | str
 
 
 class SocksProtocolErrorType(IntEnum):
@@ -88,7 +89,7 @@ class SocksDestinationRequest:
     command: SocksDestinationCommand
     reserved: int
     address_type: SocksAddressType
-    address: str | IPv4Address | IPv6Address
+    address: _AddressUnion
     port: int
 
     @classmethod
@@ -117,7 +118,7 @@ class SocksDestinationResponse:
     reply: SocksProtocolErrorType
     reserved: int
     address_type: SocksAddressType
-    address: str | IPv4Address | IPv6Address
+    address: _AddressUnion
     port: int
 
     def to_packet(self):
@@ -187,11 +188,13 @@ class Socks5Protocol(asyncio.Protocol):
         config: VMessClientConfig,
         *,
         auth: tuple[str, str] | None = None,
+        udp_associate: bool = False,
     ):
         self.auth = auth
         self.config = config
+        self.udp_associate = udp_associate
 
-        self.reader = BytesReader(b"")
+        self.reader = BytesReader()
         self.state = SocksProtocolState.HANDSHAKE
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
@@ -213,7 +216,7 @@ class Socks5Protocol(asyncio.Protocol):
         try:
             self._data_received()
         except SocksProtocolError as e:
-            logger.error("Error occurred while processing SOCKS5 request: %s", e)
+            logger.exception("Error occurred while processing SOCKS5 request")
             self._close_with_error(e)
 
     def _close_with_error(self, error: SocksProtocolError | None = None):
@@ -288,8 +291,6 @@ class Socks5Protocol(asyncio.Protocol):
                 asyncio.create_task(self._connect()).add_done_callback(
                     self._connect_exception_handler
                 )
-            # case SocksDestinationCommand.UDP_ASSOCIATE:
-            #     self._associate_udp()
             case _:
                 raise SocksProtocolError(
                     "invalid command",
@@ -363,49 +364,6 @@ class Socks5Protocol(asyncio.Protocol):
             SocksProtocolError("connection error", error_type=error_type)
         )
 
-    async def _associate_udp(self):
-        loop = asyncio.get_event_loop()
-
-        listen_host = self.dest.address
-        listen_port = self.dest.port
-        if ip_address(listen_host).packed == b"\x00\x00\x00\x00" and listen_port == 0:
-            listen_host, listen_port = self.transport.get_extra_info("sockname")
-
-        client_host, _ = self.peer_address
-        _, protocol = await loop.create_connection(
-            lambda: VMessClientProtocol(
-                self.dest.address,
-                self.dest.port,
-                VMessBodyCommand.UDP,
-                config=self.config,
-            ),
-            self.config.server_host,
-            self.config.server_port,
-        )
-        await protocol.wait_connection()
-
-        transport, _ = await loop.create_datagram_endpoint(
-            lambda: Socks5UDPRelay(self, client_host),
-            local_addr=(str(listen_host), listen_port),
-        )
-        local_addr, local_port = transport.get_extra_info("sockname")
-        local_addr = ip_address(local_addr)
-        match local_addr:
-            case IPv4Address():
-                address_type = SocksAddressType.IPV4
-            case IPv6Address():
-                address_type = SocksAddressType.IPV6
-        reply = SocksDestinationResponse(
-            SocksProtocolErrorType(0),
-            0,
-            address_type,
-            local_addr,
-            local_port,
-        )
-
-        self.remote_protocol = protocol
-        self.transport.write(reply.to_packet())
-
     def eof_received(self):
         self.remote_protocol.send_data(b"")
         self.remote_protocol.transport.write_eof()
@@ -422,83 +380,81 @@ class Socks5Protocol(asyncio.Protocol):
         return
 
 
-class Socks5UDPRelay(asyncio.DatagramProtocol):
-    def __init__(self, parent: Socks5Protocol, acceptable_host: str):
-        self.parent = parent
-        self.acceptable_host = acceptable_host
+class Socks5RelayProtocol(asyncio.DatagramProtocol):
+    connections: ClassVar[
+        dict[tuple[tuple[str, int], tuple[_AddressUnion, int]], VMessClientProtocol]
+    ] = {}  # (src, dst) -> protocol, src = (ip, port), dst = (ip, port)
 
-        # format: {(host, port): ({index: fragment}, last_received)
-        self.fragments: dict[tuple[str, int], tuple[dict[int, bytes], float]] = {}
-        self.fragment_timeout = 10
+    def __init__(self, config: VMessClientConfig, *, connection_timeout: int = 10):
+        self.config = config
+        self.connection_timeout = connection_timeout
+
+    def connection_made(self, transport: asyncio.DatagramTransport) -> None:
+        self.transport = transport
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
-        host, port = addr
-        if host != self.acceptable_host:
-            logger.warning("Received UDP packet from unauthorized host: %s:%s", host)
-            return
-        if not self.parent.remote_protocol:
-            logger.warning("Received UDP packet before remote connection established")
-            return
+        logger.debug("Received %d bytes UDP packet from %s:%s", len(data), *addr)
+
         packet = Socks5DatagramPacket.from_packet(BytesReader(data))
-        if packet.fragment != 0:
-            logger.debug("Fragmented UDP packet received, dropping")
+
+        if packet.fragment:
+            logger.debug("Fragmented UDP packet from %s:%s dropped", *addr)
             return
 
-    def _process_fragment(self, packet: Socks5DatagramPacket, addr: tuple[str, int]):
-        # Cleanup old fragments
-        for addr, (_, last_received) in [*self.fragments.items()]:
-            if last_received + self.fragment_timeout < time.time():
-                del self.fragments[addr]
-                continue
+        dst = (packet.address, packet.port)
+        connection_tuple = (addr, dst)
+        protocol = type(self).connections.get(connection_tuple)
 
-        # highest bit of fragment is 1, so we should send the packet
-        should_send = bool(packet.fragment & 0b10000000)
-        packet.fragment &= 0b01111111
+        if not protocol or protocol.transport.is_closing():
+            protocol = VMessClientProtocol(
+                packet.address,
+                packet.port,
+                VMessBodyCommand.UDP,
+                config=self.config,
+            )
+            type(self).connections[connection_tuple] = protocol
 
-        if packet.fragment == 0:
-            return
+            asyncio.create_task(
+                self._create_connection(addr, protocol)
+            ).add_done_callback(lambda fut: self._connection_end_handler(protocol, fut))
 
-        existing, _ = self.fragments.pop(addr, ({}, 0))
+        protocol.send_data(packet.data)
 
-        # If max fragment is less than current, we should drop the full fragment
-        if max(existing.keys(), default=0) > packet.fragment:
-            return
-        existing[packet.fragment] = packet.data
-        # Check continuous fragment
-        if len(existing) < packet.fragment:
-            return
-        self.fragments[addr] = (existing, time.time())
+    async def _create_connection(
+        self, sendto: tuple[str, int], protocol: VMessClientProtocol
+    ):
+        loop = asyncio.get_event_loop()
 
-        if not should_send:
-            return
-        # If we should send the packet, we should merge all
-        fragments, _ = self.fragments.pop(addr)
-        data = b"".join(fragments.values())
-
-
-if __name__ == "__main__":
-    import logging
-    import sys
-
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        stream=sys.stderr,
-    )
-
-    async def main():
-        config = VMessClientConfig(
-            server_host="localhost",
-            server_port=10086,
-            user_id=uuid.UUID("b831381d-6324-4d53-ad4f-8cda48b30811"),
+        await loop.create_connection(
+            lambda: protocol,
+            self.config.server_host,
+            self.config.server_port,
         )
-        loop = asyncio.get_running_loop()
-        server = await loop.create_server(
-            lambda: Socks5Protocol(config),
-            host="127.0.0.1",
-            port=1080,
-        )
-        async with server:
-            await server.serve_forever()
 
-    asyncio.run(main())
+        await protocol.wait_connection()
+
+        recv_data = protocol.recv_data()
+        while not protocol.transport.is_closing():
+            try:
+                data = await asyncio.wait_for(anext(recv_data), self.connection_timeout)
+            except TimeoutError:
+                logger.debug(
+                    "UDP connection from %s:%s closed, no recent activity", *sendto
+                )
+                break
+            except StopAsyncIteration:
+                break
+            self.transport.sendto(data, sendto)
+
+    def _connection_end_handler(
+        self, protocol: VMessClientProtocol, fut: asyncio.Future
+    ):
+        try:
+            fut.result()
+            protocol.transport.write_eof()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Connection error occurred")
+        self.transport.close()
+        protocol.transport.close()

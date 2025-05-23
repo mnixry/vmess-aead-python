@@ -5,6 +5,7 @@ from secrets import randbits, token_bytes
 from uuid import uuid4
 
 import pytest
+
 from vmess_aead import VMessAEADRequestPacketHeader, VMessAEADResponsePacketHeader
 from vmess_aead.encoding import VMessBodyDecoder, VMessBodyEncoder
 from vmess_aead.enums import (
